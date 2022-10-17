@@ -1,0 +1,1349 @@
+---
+title: "Social Protests Increase Donations to Federal Political Campaigns: Data Cleaning"
+author: "Nick Pangakis and Dan Gillion"
+output: 
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    code_folding: show
+    highlight: haddock
+    number_sections: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  word_document:
+    toc: yes
+    toc_depth: '4'
+urlcolor: blue
+editor_options: 
+  chunk_output_type: inline
+---
+
+\pagebreak
+
+# Overview - Data Preparation
+
+How do protests influence American political behavior? This project investigates how political protests affect an individual's willingness to donate money to a federal political campaign. In this markdown, I describe the data cleaning procedures associated with this project. Please note that running this script takes roughly 2.5 hours to run in total.
+
+This study merges data from three sources:
+
+1.  First, we harness a dataset on the timing and location of social protests occurring across the United States (2017-2021) from a nonpartisan nonprofit called [Crowd Counting Consortium (CCC)](https://sites.google.com/view/crowdcountingconsortium/home?authuser=0). The CCC collects publicly available data on political crowds reported in the United States, including marches, protests, strikes, demonstrations, riots, and other actions. The data is available for public download.
+
+2.  Second, we access all individual-level campaign contributions to federal elections (2017-2021). This data comes from the [Federal Election Commission](https://www.fec.gov/data/browse-data/?tab=bulk-data), which is available for public download.
+
+3.  Third, we utilize a dataset that includes the gender and race of every candidate running for federal office in the year 2020. This is a nonpublic dataset that was originally gathered by a nonpartisan nonprofit called [OpenSecrets](https://www.opensecrets.org/gender-race-and-politics). Please reach out to authors or OpenSecrets for access to this dataset.
+
+\pagebreak
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, fig.width=8, fig.height=4, include=TRUE, eval=FALSE)
+options(scipen = 0, digits = 3)  # controls base R output
+if(!require('pacman')) {
+  install.packages('pacman')
+}
+pacman::p_load(tidyverse, RCurl, here, 
+               data.table, bit64, stringr, 
+               readxl, tidyr) 
+```
+
+# Protest Data (2017-2021)
+
+In this first section, I download the protest data from the CCC and clean/shape the data into various dataframes. The raw data contains the location and timing of political protests occurring across the country from 2017 to 2021. First, I aggregate the protest data by week, county, and year. As a result, the data include the number of protests occurring in a county in a given week for each year from 2017 to 2021. Second, I aggregate the protest data by day, county, and year, which results in a dataframe that includes the number of protests occurring in a county for every day of each year (2017-2021). 
+
+For both the daily and the weekly data, I apply several filters and create numerous subsets of the protest data. These filters include, but are not limited to, restricting the dataset to only larger protest events, only high salience protest events, only liberal protests, and only conservative protests. The final output includes 14 different tables that include the number of daily or weekly protests occurring in a county. These different data tables are described in greater detail below and are stored collectively in the final output dataframe, `protest_dataframes`. This section of the script should take less than 5 to 10 minutes to run in total.
+
+```{r Download raw data and clean data}
+# Load in protest data
+protest_raw <-
+  read.csv(text = getURL(
+      "https://raw.githubusercontent.com/nonviolent-action-lab/crowd-counting-consortium/master/ccc_compiled.csv"))
+
+# Data Wrangling - see data dictionary (https://github.com/nonviolent-action-lab/crowd-counting-consortium/blob/master/ccc_data_dictionary.md)
+protest_clean_all <- protest_raw %>%
+  filter(online == 0) %>%  # Binary indicator for online-only events. 1 = yes, 0 = no.)
+  select(
+    date, # Date of event in YYYY-MM-DD format (character)
+    state, # Two-letter U.S. postal abbreviation for the state or territory in which the event took place. 
+    type, # Type(s) of action (e.g. march, protest, demonstration, strike, counter-protest, sit-in), separated with semi-colons if more than one.
+    valence, # Political valence of the event relative to President Trump, broadly construed. 2 = pro-Trump, 1 = anti-Trump, 0 = neither or unrelated. 
+    issues, # String of semicolon-separated tags identifying political issues associated with the event (e.g., "democracy; women's rights" for events associated with the 2017 Women's March)
+    size_mean, # Average of size_low and size_high (which in most cases is the same value).
+    size_low,
+    size_cat, # Ordered categorical indicator of crowd size, representing orders of magnitude and based on size_mean. 0 = unknown; 1 = 1-99; 2 = 100-999; 3 = 1,000-9,999; 4 = 10,000+.
+    arrests_any, # Binary indicator for whether or not any arrests occurred. 1 = yes, 0 = no.
+    injuries_crowd_any, # Binary indicator for whether or not any protesters were reportedly injured. 1 = yes, 0 = no.
+    injuries_police_any, # Binary indicator for whether or not any police officers were reportedly injured. 1 = yes, 0 = no.
+    property_damage_any, # Binary indicator for whether or not protesters caused any property damage. 1 = yes, 0 = no.
+    fips_code # Five-digit FIPS code for the county
+  ) %>%
+  # limit to only US states
+  filter(state != "VI" & state != "GU" & state != "PR") %>% 
+  # cast data types and clean some variables
+  mutate(fips_code = as.character(fips_code),
+      fips_code = case_when(nchar(fips_code) == 4 ~ paste0("0", fips_code),TRUE ~ fips_code),
+      year = str_split_fixed(date,"-",2)[,1],
+      # recode valence to factor
+      valence = as.factor(recode(valence,
+      "2" = "conservative",
+      "1" = "liberal",
+      "0" = "independent"
+    )),
+    # aggregate salience into a summary measure, low is zero and high is 4
+    salience = rowSums(.[9:12])
+  ) %>% 
+  # filter for subset of years
+  filter(year == 2017 | year == 2018 | year == 2019 | year == 2020 | year == 2021)
+
+# load to get full list of counties and zip codes
+zip_to_county_data <- read_excel(here("raw_data/ZIP_COUNTY_092021.xlsx")) %>% 
+  select(1, 2) %>% 
+  # limit to unique zip codes (bc several zip codes lie in multiple counties)
+  distinct_at(vars(ZIP), .keep_all = T)
+
+```
+
+```{r Create function for subsetting and aggregating protest data -- WEEKLY}
+# Create function to aggregate number of protests in a county by week
+protest_by_week <- function(data){
+  data %>% 
+  # create week variable
+  mutate(week = week(as.Date(date, format = "%Y-%m-%d"))) %>%
+  # group by fips county code, week, year
+  group_by(fips_code, week, year) %>%
+  # count protests per week per county
+  count() %>%
+  # join with the county data by county
+  right_join(unique(zip_to_county_data["COUNTY"]),by= c("fips_code"="COUNTY")) %>%
+  ungroup() %>%
+  # create every combination of week, fips county and year
+  tidyr::complete(week, fips_code, year) %>%
+  rename(date = week) %>% 
+  # fill NA values with 0 (since not every county has protests in a given week... the NAs come from complete())
+  replace_na(list(n=0)) %>%
+  # drop any remaining NAs
+  drop_na() %>%
+  mutate(year = as.numeric(year))
+}
+```
+
+```{r Subset and aggregate the protest data -- weekly}
+
+# Aggregate total protests per county per week
+# full data
+protest_weekly_all <- protest_clean_all %>% 
+  protest_by_week() %>% 
+  # create indicators to identify which subset of the data it is
+  mutate(
+       weekly = 1,
+       large = 0,
+       liberal = 0,
+       conservative = 0,
+       onlyprotest = 0,
+       norallies = 0,
+       salient = 0)
+
+# Subset = only protest events with over 30 people
+# used as primary data
+protest_weekly_large <- protest_clean_all %>% 
+  filter(size_mean > 30) %>% 
+  protest_by_week() %>% 
+  mutate(weekly = 1,
+         large = 1,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+
+# Subset = Liberal protests (only protests over 30 people)
+protest_grouped_week_liberal <- protest_clean_all %>% 
+  filter(size_mean>30) %>%
+  filter(valence == "liberal") %>% 
+  protest_by_week() %>% 
+    mutate(weekly = 1,
+           large = 0,
+           liberal = 1,
+           conservative = 0,
+           onlyprotest = 0,
+           norallies = 0,
+           salient = 0)
+
+# Subset = conservative protests (only protests over 30 people)
+protest_grouped_week_conservative <- protest_clean_all %>% 
+  filter(size_mean>30) %>%
+  filter(valence == "conservative") %>% 
+  protest_by_week() %>% 
+  mutate(weekly = 1,
+         large = 0,
+         liberal = 0,
+         conservative = 1,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+
+########## Supplemental data
+
+# Subset = only 'protest' events (only protests over 30 people)
+protest_weekly_onlyprotests <- protest_clean_all %>%
+  mutate(type = tolower(type)) %>%
+  filter(size_mean > 30 , str_detect(type,"protest")) %>%
+  protest_by_week() %>% 
+  mutate(weekly = 1,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 1,
+         norallies = 0,
+         salient = 0)
+
+# Exclude rallies - limit to protests, walkout, march, demonstration, vigil, strike, gathering, sit-in, picket  (only protests over 30 people)
+protest_weekly_norallies <- protest_clean_all %>%
+  mutate(type = tolower(type)) %>%
+  filter(size_mean > 30,
+         str_detect(type,
+                    "protest|walkout|march|demonstration|vigil|strike|gathering|sit|picket")) %>%
+  protest_by_week() %>% 
+  mutate(weekly = 1,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 1,
+         salient = 0)
+
+# Subset = high salience protest events only (only protests over 30 people)
+# high salience = a protest that resulted in an arrest, property damage, or injuries
+protest_weekly_salient <- protest_clean_all %>%
+  filter(size_mean > 30 , salience > 0) %>%
+  protest_by_week() %>% 
+  mutate(weekly = 1,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 1)
+
+```
+
+```{r Create function for subsetting and aggregating protest data -- Daily}
+# Create function to aggregate number of protests in a county by day
+protest_by_day <- function(data){
+  data %>% 
+    # group by fips county code and day
+    group_by(fips_code, date) %>%
+    # count protests per day per county
+    count() %>%
+    # join with the county data by county
+    right_join(unique(zip_to_county_data["COUNTY"]), by= c("fips_code"="COUNTY")) %>%
+    ungroup() %>%
+    # create every combination of day and fips county
+    tidyr::complete(date, fips_code) %>%
+    # fill NA values with 0 (since not every county has protests in a given day)
+    replace_na(list(n=0)) %>%
+    # drop any remaining NAs
+    drop_na() %>% 
+    mutate(year = NA)
+}
+```
+
+```{r Subset and aggregate the protest data -- daily}
+
+# Aggregate total protests per county per week
+# full data
+protest_daily_all <- protest_clean_all %>% 
+  protest_by_day() %>% 
+  mutate(weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+# Since not every date has a donation across the dataframe, not every date-county pair populates. Manually add in missing values
+full_dates <- seq.Date(as.IDate("2017-01-01"), as.IDate("2021-12-31"), by="days")
+full_counties <- unique(protest_clean_all$fips_code)
+county_date_pairs <- expand.grid(full_dates, full_counties) %>% 
+  rename(date = Var1, fips_code = Var2) %>% 
+  mutate(date = as.character(date))
+missing <- anti_join(county_date_pairs, protest_daily_all[,c("date","fips_code")])
+# append missing 
+missing <- missing %>% 
+  mutate(n = 0,
+         year = NA,
+         weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+protest_daily_all <- rbind(protest_daily_all, missing)
+
+# Subset = 'protest' events with over 30 people
+# used as primary data
+protest_daily_large <- protest_clean_all %>% 
+  filter(size_mean > 30) %>% 
+  protest_by_day() %>% 
+  mutate(weekly = 0,
+         large = 1,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+# Since not every date has a protest across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(protest_daily_all[,c("date","fips_code")], protest_daily_large[,c("date","fips_code")])
+# append missing 
+missing <- missing %>% 
+  mutate(n = 0,
+         year = NA,
+         weekly = 0,
+         large = 1,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+protest_daily_large <- rbind(protest_daily_large, missing)
+
+# Subset = Liberal protest (only protests over 30 people)
+protest_grouped_daily_liberal <- protest_clean_all %>% 
+  filter(size_mean > 30) %>%
+  filter(valence == "liberal") %>% 
+  protest_by_day() %>% 
+    mutate(weekly = 0,
+           large = 0,
+           liberal = 1,
+           conservative = 0,
+           onlyprotest = 0,
+           norallies = 0,
+           salient = 0)
+# Since not every date has a protest across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(protest_daily_all[,c("date","fips_code")], protest_grouped_daily_liberal[,c("date","fips_code")])
+# append missing 
+missing <- missing %>% 
+  mutate(n = 0,
+         year = NA,
+         weekly = 0,
+         large = 0,
+         liberal = 1,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+protest_grouped_daily_liberal <- rbind(protest_grouped_daily_liberal, missing)
+
+# Subset = conservative protest (only protests over 30 people)
+protest_grouped_daily_conservative <- protest_clean_all %>% 
+  filter(size_mean>30) %>%
+  filter(valence == "conservative") %>% 
+  protest_by_day() %>% 
+  mutate(weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 1,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+# Since not every date has a protest across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(protest_daily_all[,c("date","fips_code")], protest_grouped_daily_conservative[,c("date","fips_code")])
+# append missing 
+missing <- missing %>% 
+  mutate(n = 0,
+         year = NA,
+         weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 1,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 0)
+protest_grouped_daily_conservative <- rbind(protest_grouped_daily_conservative, missing)
+
+########## Supplemental data
+
+# Subset = 'protest' events only (only protests over 30 people)
+protest_daily_onlyprotests <- protest_clean_all %>%
+  mutate(type = tolower(type)) %>%
+  filter(size_mean > 30 , str_detect(type,"protest")) %>%
+  protest_by_day() %>% 
+  mutate(weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 1,
+         norallies = 0,
+         salient = 0)
+# Since not every date has a protest across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(protest_daily_all[,c("date","fips_code")], protest_daily_onlyprotests[,c("date","fips_code")])
+# append missing 
+missing <- missing %>% 
+  mutate(n = 0,
+         year = NA,
+         weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 1,
+         norallies = 0,
+         salient = 0)
+protest_daily_onlyprotests <- rbind(protest_daily_onlyprotests, missing)
+
+# Exclude rallies - limit to protests, walkout, march, demonstration, vigil, strike, gathering, sit-in, picket  (only protests over 30 people)
+protest_daily_norallies <- protest_clean_all %>%
+  mutate(type = tolower(type)) %>%
+  filter(size_mean > 30,
+         str_detect(type,
+                    "protest|walkout|march|demonstration|vigil|strike|gathering|sit|picket")) %>%
+  protest_by_day() %>% 
+  mutate(weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 1,
+         salient = 0)
+# Since not every date has a protest across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(protest_daily_all[,c("date","fips_code")], protest_daily_norallies[,c("date","fips_code")])
+# append missing 
+missing <- missing %>% 
+  mutate(n = 0,
+         year = NA,
+         weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 1,
+         salient = 0)
+protest_daily_norallies <- rbind(protest_daily_norallies, missing)
+
+# Subset = high salience protest events only (only protests over 30 people)
+# high salience = a protest that resulted in an arrest, property damage, or injuries
+protest_daily_salient <- protest_clean_all %>%
+  filter(size_mean > 30 , salience > 0) %>%
+  protest_by_day() %>% 
+  mutate(weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 1)
+# Since not every date has a protest across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(protest_daily_all[,c("date","fips_code")], protest_daily_salient[,c("date","fips_code")])
+# append missing 
+missing <- missing %>% 
+  mutate(n = 0,
+         year = NA,
+         weekly = 0,
+         large = 0,
+         liberal = 0,
+         conservative = 0,
+         onlyprotest = 0,
+         norallies = 0,
+         salient = 1)
+protest_daily_salient <- rbind(protest_daily_salient, missing)
+
+```
+
+```{r Write protest dataframes to csv}
+# Remove unnecessary dataframes
+rm(protest_raw, zip_to_county_data, protest_clean_all, missing, county_date_pairs, full_counties, full_dates)
+
+# Extract all dataframes and save into list
+protest_dataframes_ls <- Filter(function(x) is(x, "data.frame"), mget(ls()))
+protest_dataframes <- do.call(rbind, protest_dataframes_ls)
+# Write to csv
+write.csv(protest_dataframes, "\\protest_data.csv", row.names = FALSE)
+# remove all dataframes
+rm(list=ls())
+```
+
+Following the data cleaning procedures, the final output is `protest_data.csv`, which contains eight primary dataframes and six supplemental dataframes for analysis.
+
+Primary dataframes:
+
+-   1) `protest_weekly_all`: The number of weekly protests that occur in an American county for every year from 2017 to 2021 (ID is weekly = 1).
+-   2) `protest_daily_all`: The number of daily protests that occur in an American county for every year from 2017 to 2021 (ID is weekly = 0).
+
+-   3) `protest_weekly_large`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people (ID is weekly = 1 and large = 1). 
+-   4) `protest_daily_large` is the same as `protest_weekly_large` but with daily protest data (ID is weekly = 0 and large = 1).
+
+-   5) `protest_grouped_week_liberal`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and are labeled as liberal protests (ID is weekly = 1 and liberal = 1). 
+-   6) `protest_grouped_daily_liberal` is the same as `protest_grouped_week_liberal` but with daily data (ID is weekly = 0 and liberal = 1).
+
+-   7) `protest_grouped_week_conservative`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and are labeled as conservative protests (ID is weekly = 1 and conservative = 1). 
+-   8) `protest_grouped_daily_conservative` is the same as `protest_grouped_week_conservative` but daily data (ID is weekly = 0 and conservative = 1).
+
+
+Supplemental dataframes: 
+
+-  9) `protest_weekly_onlyprotests`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and only includes protest activities explicitly labeled as "protests." (ID is weekly = 1 and onlyprotest = 1). 
+-  10) `protest_daily_onlyprotests` is the same as `protest_weekly_onlyprotests` but daily (ID is weekly = 0 and onlyprotest = 1).
+
+-  11) `protest_weekly_norallies`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and excludes any protest activities explicitly labeled as "rallies." (ID is weekly = 1 and norallies = 1).
+-  12) `protest_daily_norallies` is the same as `protest_weekly_norallies` but daily (ID is weekly = 0 and norallies = 1).
+
+-  13) `protest_weekly_salient`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and only includes protest activities resulting in an arrest, property damage, or injuries. (ID is weekly = 1 and salient = 1).
+-  14) `protest_daily_salient` is the same as `protest_weekly_salient` but daily (ID is weekly = 0 and salient = 1).
+
+
+
+
+# FEC Campaign Contribution Data (2017-2021)
+
+In this second section, I clean individual-level donations to federal political campaigns from the FEC website (2017-2021). The cleaning procedures contain four parts: 1) cleaning the FEC candidate data, 2) cleaning the donations made by individuals, 3) aggregating individual-donations by week, and 4) aggregating individual-donations by day. I describe each part in detail below.
+
+## Part I: Clean FEC Candidate Data
+
+The candidate data come from two sources: the FEC website and OpenSecrets, which is a non-partisan, nonprofit research group. The FEC data contain a candidate's full name, their political party, incumbency status, their location (i.e., state and zip code), and their committee id. The OpenSecrets data also contains a candidate's full name, political party, committee ID, but also includes a candidates race and gender. I join the FEC data with the OpenSecrets data by state, last name, and political party. Later in the script, I join the candidate data to the individual-level donations by committee ID, which allows one to identify which candidate(s) each voter is donating. However, 3845 out of 23521 candidates (16.3 percent) do not have listed committee IDs, which means I cannot connect donations to these candidates. Final candidate dataset: `candidates_full`.
+
+```{r Function to Clean FEC Candidate Data}
+clean_candidate <- function(data, year){
+  # Data Wrangling -
+  fec_candidate_subset <- data %>%
+      # select subset of variables and rename
+      select("party" = V3,
+             "candidate_name" = V2,
+             "year" = V4,
+             "state" = V5,
+             "office" = V6,
+             "district_number" = V7,
+             "incumbent_status" = V8,
+             "CMTE_ID" = V10,
+             "zip_code" = V15) %>% 
+      # filter for donations made in a given year
+      filter(year == year) %>% 
+      mutate(# rename presidential candidate indicators
+             office = str_replace(office,"P","PRES"),
+             # only keep political party if more than 250 candidates (otherwise grouped into 'other')
+             party = fct_lump_min(as.factor(party), 250),
+             # recode Democrat, Republican, and Independent party indicators
+             party = recode(as.character(party),"DEM" = "D","REP" = "R","IND" = "I"),
+             # recode incumbents
+             incumbent = case_when(incumbent_status == "I" ~ 1, TRUE ~ 0),
+             # recode challengers
+             challenger = case_when(incumbent_status == "C" ~ 1, TRUE ~ 0)) %>%
+      # split candidate data into first and last names
+      separate(candidate_name, into = c("last_name","first_name"), sep =",") 
+  
+  return(fec_candidate_subset)
+}
+
+
+```
+
+
+```{r Candidate Data Cleaning}
+
+# Load to get full list of counties and zip codes
+zip_to_county_data <- read_excel(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/ZIP_COUNTY_092021.xlsx")) %>% 
+  select(1, 2) %>% 
+  # limit to unique zip codes (bc several zip codes lie in multiple counties)
+  distinct_at(vars(ZIP), .keep_all = T)
+
+# Manually Download Candidates Data from FEC website and read in .txt file (https://www.fec.gov/data/browse-data/?tab=bulk-data)
+# Candidate Master
+# 2017-2018: https://www.fec.gov/files/bulk-downloads/2018/cn18.zip
+candidate_2018 <- fread(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/candidate_2018.txt"), 
+                        sep = "|", header = FALSE, stringsAsFactors = FALSE)
+candidate_2018 <- clean_candidate(candidate_2018, "2017|2018")
+# 2019-2020: https://www.fec.gov/files/bulk-downloads/2020/cn20.zip
+candidate_2020 <- fread(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/candidate_2020.txt"), 
+                        sep = "|", header = FALSE, stringsAsFactors = FALSE)
+candidate_2020 <- clean_candidate(candidate_2020, "2019|2020")
+# 2021-2022: https://www.fec.gov/files/bulk-downloads/2022/cn22.zip
+candidate_2022 <- fread(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/candidate_2022.txt"), 
+                        sep = "|", header = FALSE, stringsAsFactors = FALSE)
+candidate_2022 <- clean_candidate(candidate_2022, "2021|2022")
+# Combine the fec candidate data
+candidate_fec <- rbind(candidate_2018, candidate_2020, candidate_2022)
+
+# Examine missing committee IDs 
+# 3845 out of 23521 candidates do not have committee ids (16.3 percent missing)
+nrow(candidate_fec[candidate_fec$CMTE_ID == "",])/nrow(candidate_fec)
+
+# Load in 2020 OpenSecrets Candidate Data, which includes information on candidate race and gender)
+# Please reach out to authors for access to this dataset
+os_candidate_raw <- read_csv(here("/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/candidaterace.csv"))
+
+# Data Wrangling - OpenSecrets candidate data (2020 only)
+os_candidate_subset <- os_candidate_raw %>% 
+  # select subset of columns
+  select("state" = distidrunfor,
+         "candidate_name" = firstlastp,
+         party,
+         crprace) %>% 
+  mutate(# only keep political party if more than 250 candidates (otherwise grouped into 'other')
+         party = fct_lump_min(as.factor(party), 250),
+         # rename presidential candidate indicators
+         state = str_replace(state,"PRES","US"),
+         # change state to first two letters
+         state = substr(state,1,2),
+         # clean race indicators
+         africanamerican = case_when(crprace == "b"| crprace == "B" ~ 1, TRUE ~ 0),
+         white = case_when(crprace == "W"|crprace == "w" ~ 1, TRUE ~ 0),
+         # clean candidate name - split first and last, change to uppercase, remove whitespace
+         candidate_name = trimws(str_split_fixed(toupper(candidate_name),
+                                                 "\\(", 2)[,1], which = "right"))
+# Manually clean OS candidate name - remove names with JR
+os_candidate_subset$candidate_name <- gsub(' JR.$', "", os_candidate_subset$candidate_name)
+# Clean OS candidate name - split on second white space
+os_candidate_subset <- extract(os_candidate_subset, 
+                               candidate_name,
+                               into = c("first_name","last_name"), '(.*)\\s+([^ ]+)$')
+
+# Join the FEC and OS candidate data
+candidates_full <- candidate_fec %>% 
+  # join by state, laste name, and party
+  left_join(os_candidate_subset, 
+            by=c("state", "last_name", "party")) %>% 
+  # clean race variables
+  replace_na(list(crprace = "NULL", africanamerican = 0)) %>% 
+  # clean remaining variabeles
+  mutate(democrat = case_when(party == "D" ~ 1, 
+                              TRUE ~ 0),
+         republican = case_when(party == "R" ~ 1, 
+                                TRUE ~ 0),
+         zip_code = as.character(zip_code),
+         zip_code = case_when(nchar(zip_code) == 4 ~ paste0("0", zip_code), 
+                              TRUE ~ zip_code)
+         ) %>% 
+  select(party, state, CMTE_ID, incumbent, 
+         challenger, africanamerican, white, 
+         democrat, republican) %>% 
+  replace_na(list(white = 0))
+
+rm(candidate_2018, candidate_2020, candidate_2022, 
+   candidate_fec, os_candidate_raw, os_candidate_subset)
+
+```
+
+## Part II: Clean Individual-level FEC Contribution data
+
+In part II, I clean the FEC individual contribution data. The raw data comes from https://www.fec.gov/data/browse-data/?tab=bulk-data, under the section "Contribution by individuals." Please note that manually downloading the data and running this section of the code is very slow, because it is cleaning large files. Expect the download process to take around 4-5 hours and the cleaning process to take around 2 hours. 
+
+```{r Create Function for Data Wrangling - FEC Contribution Data}
+
+# Create function to download and clean the FEC data
+fec_cleaned <- function(file) {
+  
+  # Read in data from FEC website
+  data <- fread(here(file), 
+                sep = "|", header = FALSE, 
+                stringsAsFactors = FALSE)
+  
+  # Rename columns
+  colnames(data) <- colnames(header)
+  
+  # Data cleaning
+  fec_cleaned <- data %>%
+    # subset columns
+    select(CMTE_ID, ZIP_CODE, TRANSACTION_DT, TRANSACTION_AMT) %>%
+    # data wrangling
+    mutate(# cast date to character
+          TRANSACTION_DT = as.character(TRANSACTION_DT),
+          # create year variable
+          year = str_sub(TRANSACTION_DT, -4, -1),
+          # keep first 5 characters of zip code
+          ZIP_CODE = substr(ZIP_CODE, 1, 5),
+          # if data is only 7 characters, add 0 in front (loading in drops leading zero)
+          TRANSACTION_DT = case_when(
+            nchar(TRANSACTION_DT) == 7 ~ paste0("0", TRANSACTION_DT),
+            TRUE ~ TRANSACTION_DT),
+          # cast data to data type variable
+          TRANSACTION_DT = as.Date(
+            str_replace(TRANSACTION_DT, "(\\d{2})(\\d{2})(\\d{4})$", "\\1-\\2-\\3"),
+            format = "%m-%d-%Y")) %>% 
+    # filter data for 2017-2021
+    filter(year == "2017" | year == "2018" | year == "2019" | year == "2020" | year == "2021")
+  
+  # add county FIPS code per donation and candidate data
+  fec_cleaned <- fec_cleaned %>%
+    left_join(zip_to_county_data, by = c("ZIP_CODE" = "ZIP")) %>% 
+    left_join(candidates_full, by = "CMTE_ID")
+  
+  # print status report
+  print("Complete")
+  print(file)
+  
+  return(fec_cleaned)
+}
+
+```
+
+```{r Data Wrangling - FEC Contribution Data}
+##### This cell downloads all the FEC individual-level donations from the FEC website
+### Please note, this cell will take about 2 hours to run
+
+# Contribution data
+# Source: https://www.fec.gov/campaign-finance-data/contributions-individuals-file-description/
+start.time <- Sys.time()
+
+# Read in FEC contribution header
+header <- fread(here("/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/indiv_header_file.csv"))
+
+# Write function to preprocess the data
+fec_process <- function(){
+  # 2017-2018 FEC individual contributions
+  # Source: https://www.fec.gov/files/bulk-downloads/2018/indiv18.zip
+  file <- "/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/fec_2018.txt"
+  fec_cleaned_2017_2018 <- fec_cleaned(file)
+  
+  # 2019-2020 FEC individual contributions
+  # Source: https://www.fec.gov/files/bulk-downloads/2020/indiv20.zip
+  file <- "/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/fec_2020.txt"
+  fec_cleaned_2019_2020 <- fec_cleaned(file)
+  
+  # 2021-2022 FEC individual contributions
+  # Source: https://www.fec.gov/files/bulk-downloads/2022/indiv22.zip
+  file <- "/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/fec_2022.txt"
+  fec_cleaned_2021_2022 <- fec_cleaned(file)
+  
+  # Bind FEC donation data by row
+  fec_cleaned <- rbind(fec_cleaned_2017_2018,
+                       fec_cleaned_2019_2020,
+                       fec_cleaned_2021_2022)
+  
+  return(fec_cleaned)
+}
+
+# Process data
+fec_cleaned <- fec_process()
+# write to csv
+#write.csv(fec_cleaned, "\\fec_cleaned.csv", row.names = FALSE)
+
+```
+
+The shape of the resulting data frame (i.e., `fec_cleaned`) is 184,556,876 rows, by 14 columns. The data includes individual-level FEC contributions for the years 2017-2021. The data includes the time of the donation (i.e., date), the donation location (i.e., zip code), the transaction amount, and who each individual is donating to (i.e., committee ID).
+
+```{r}
+# how many contributions are given to democrats? republicans?
+# how many cannot be located?
+```
+
+
+## Part III: Aggregate Individual-level FEC Data BY WEEK
+
+In part III, I aggregate the number of donations made weekly in a county and the total amount of donations made weekly in a county. I complete this aggregation three times on different subsets of the data: on the full donation data, on a subset of the data for donations made to Democrats, and on a subset of the data for donations made to Republicans.
+
+```{r Helper Functions - Aggregate FEC Data -- weekly and daily}
+### Note: these functions are used in part III and part IV
+
+# Summarize FEC donations BY NUMBER of donations per time_group
+summarize_fec_count <- function(data, time_group_var, daily){
+  # data: cleaned FEC data
+  # time_group_var: week or date
+  
+  # separate weekly cleaning from daily cleaning
+  if (daily == TRUE){
+    out <- data %>% 
+            # group by county, time_group, and year
+            group_by(COUNTY, {{time_group_var}}, year) %>%
+            # count the number of donations per time_group per county
+            summarize(number_donations = n()) %>%
+            ungroup() %>%
+            # create every combination of time_group and fips county
+            tidyr::complete({{time_group_var}}, COUNTY) %>%
+            # fill NA values with 0 (since not every county has donations in a given time... the NAs come from complete())
+            replace_na(list(number_donations=0)) %>% 
+            drop_na()
+  } else {
+      out <- data %>% 
+          # extract week from transaction date
+          mutate(week = week(TRANSACTION_DT)) %>% 
+          # group by county, time_group, and year
+          group_by(COUNTY, {{time_group_var}}, year) %>%
+          # count the number of donations per time_group per county
+          summarize(number_donations = n()) %>%
+          ungroup() %>%
+          # create every combination of time_group, fips county and year
+          tidyr::complete({{time_group_var}}, COUNTY, year) %>%
+          # fill NA values with 0 (since not every county has donations in a given time... the NAs come from complete())
+          replace_na(list(number_donations=0)) %>% 
+          drop_na()
+  }
+  return(out)
+}
+
+# Summarize FEC donations BY AMOUNT of donation per time_group
+summarize_fec_amount <- function(data, time_group_var, daily){
+  
+  # separate weekly cleaning from daily cleaning
+  if (daily == TRUE){
+       out <- data %>% 
+            # Filter for donations under the individual limit and over 0
+            filter(TRANSACTION_AMT < 3001 & TRANSACTION_AMT > 0) %>% 
+            # group by county and time_group
+            group_by(COUNTY, {{time_group_var}}) %>%
+            # sum the amount of donations per time_group per county
+            summarize(amount_donations = sum(TRANSACTION_AMT)) %>%
+            ungroup() %>%
+            # create every combination of time_group and fips county
+            tidyr::complete({{time_group_var}}, COUNTY) %>%
+            # fill NA values with 0 (since not every county has donations in a given time... the NAs come from complete())
+            replace_na(list(amount_donations=0)) %>% 
+            drop_na()
+    } else {
+    out <- data %>% 
+            # extract week from transaction date
+            mutate(week = week(TRANSACTION_DT)) %>%
+            # Filter for donations under the individual limit and over 0
+            filter(TRANSACTION_AMT < 3001 & TRANSACTION_AMT > 0) %>% 
+            # group by county, time_group, and year
+            group_by(COUNTY, {{time_group_var}}, year) %>%
+            # sum the amount of donations per time_group per county
+            summarize(amount_donations = sum(TRANSACTION_AMT)) %>%
+            ungroup() %>%
+            # create every combination of time_group, fips county and year
+            tidyr::complete({{time_group_var}}, COUNTY, year) %>%
+            # fill NA values with 0 (since not every county has donations in a given time... the NAs come from complete())
+            replace_na(list(amount_donations=0)) %>% 
+            drop_na()
+  }
+  return(out)
+}
+  
+# Aggregate Donations By County Per Weekly Totals BY POLITICAL PARTY
+fec_total_county_party <- function(data, party_id, time_group_var, time_group_str, daily) {
+  
+  # count of donations by county by year BY PARTY
+  fec_grouped_count <- data %>%
+    filter(party == party_id) %>% 
+    summarize_fec_count({{time_group_var}}, daily)
+  
+  # total donation amount by county by year BY PARTY
+  fec_grouped_amount <- data %>%
+    filter(party == party_id,
+           # Filter for donations under the individual limit and over 0
+           TRANSACTION_AMT < 3001 & TRANSACTION_AMT > 0) %>%
+    summarize_fec_amount({{time_group_var}}, daily)
+  
+  # join donation count and amount data by time_group, year (only if weekly) and county
+  if (daily == TRUE){
+    fec_grouped <- fec_grouped_count %>%
+      inner_join(fec_grouped_amount, by = c(time_group_str,"COUNTY"))
+  } else {
+     fec_grouped <- fec_grouped_count %>%
+       inner_join(fec_grouped_amount, by = c(time_group_str,"year","COUNTY"))
+  }
+  
+  return(fec_grouped)
+}
+```
+
+```{r Read in FEC Data}
+# If previously downloaded FEC data, read into R
+fec_cleaned <- fread(here("processed_data/fec_cleaned.csv"))
+```
+
+
+```{r Aggregate Weekly Donation Data}
+##### This cell takes about 15 minutes to run
+
+##### Weekly Donations (Count & Amount) Per County (2017-2021)
+
+# 1) Number of weekly donations per county per week
+fec_total_weekly_county_count <- summarize_fec_count(fec_cleaned, week, FALSE)
+# add identifiers
+fec_total_weekly_county_count <- fec_total_weekly_county_count %>% 
+  mutate(amount_donations = NA, R = NA, D = NA, week_id = 1)
+
+# 2) Amount of weekly donations per county per week
+fec_total_weekly_county_amount <- summarize_fec_amount(fec_cleaned, week, FALSE)
+# add identifiers
+fec_total_weekly_county_amount <- fec_total_weekly_county_amount %>% 
+  mutate(number_donations = NA, R = NA, D = NA, week_id = 1)
+
+# 3) Number and amount of weekly donations per county per week for Republicans
+fec_total_weekly_county_R <- fec_total_county_party(fec_cleaned, "R", week, "week", FALSE)
+# add identifiers
+fec_total_weekly_county_R <- fec_total_weekly_county_R %>% 
+  mutate(R = 1, D = NA, week_id = 1)
+# Since not every week has a donation across the dataframe, not every week-county pair populates. Manually add in missing values
+missing <- anti_join(fec_total_weekly_county_count[,c("week","COUNTY","year")], fec_total_weekly_county_R[,c("week","COUNTY","year")])
+# append missing 
+missing <- missing %>% 
+  mutate(number_donations = 0, 
+         amount_donations = 0,
+         R = 1, 
+         D = NA,
+         week_id = 1)
+fec_total_weekly_county_R <- rbind(fec_total_weekly_county_R, missing)
+
+# 4) Number and amount of weekly donations per county per week for Democrats
+fec_total_weekly_county_D <- fec_total_county_party(fec_cleaned, "D", week, "week", FALSE)
+# add identifiers
+fec_total_weekly_county_D <- fec_total_weekly_county_D %>% 
+  mutate(R = NA, D = 1, week_id = 1)
+# Since not every week has a donation across the dataframe, not every week-county pair populates. Manually add in missing values
+missing <- anti_join(fec_total_weekly_county_count[,c("week","COUNTY","year")], fec_total_weekly_county_D[,c("week","COUNTY","year")])
+# append missing 
+missing <- missing %>% 
+  mutate(number_donations = 0, 
+         amount_donations = 0,
+         R = NA, 
+         D = 1,
+         week_id = 1)
+fec_total_weekly_county_D <- rbind(fec_total_weekly_county_D, missing)
+
+##### Combine Weekly Donation Data
+fec_total_weekly <- rbind(fec_total_weekly_county_count, fec_total_weekly_county_amount,
+                          fec_total_weekly_county_R, fec_total_weekly_county_D)
+# rename week
+fec_total_weekly <- fec_total_weekly %>% 
+  rename(date = week)
+
+# remove extra df
+rm(fec_total_weekly_county_count, fec_total_weekly_county_amount, 
+   fec_total_weekly_county_R, fec_total_weekly_county_D, missing)
+```
+
+Four datasets for weekly analysis are grouped into one dataframe, `fec_total_weekly`:
+
+ - `fec_total_weekly_county_count`: number of weekly donations by county
+ - `fec_total_weekly_county_amount`: total amount of weekly donations in US dollars by county
+ - `fec_total_weekly_county_R`: number and amount of donations by week per county made to Republicans
+ - `fec_total_weekly_county_D`: number and amount of donations by week per county made to Democrats
+
+## Part IV: Aggregate Individual-level FEC Data BY COUNTY-DAY (2017-2021)
+
+In part IV, I aggregate the number of donations made daily in a county and the total amount of donations made daily in a county. Like part III, I complete this aggregation three times: on the full donation data, on a subset of the data for donations made to Democrats, and on a subset of the data for donations made to Republicans. Finally, I join the daily donation data to the weekyl donation data.
+
+```{r Aggregate Daily Donation Data}
+##### Please note: this cell takes around 30 minutes to run  
+
+
+##### Daily Donations (Count & Amount) Per County (2017-2021)
+
+# 1) Number of daily donations per county 
+fec_total_daily_county_count <- summarize_fec_count(fec_cleaned, TRANSACTION_DT, TRUE)
+# add identifiers
+fec_total_daily_county_count <- fec_total_daily_county_count %>% 
+  mutate(amount_donations = NA, R = NA, D = NA, week_id = 0)
+# Since not every date has a donation across the dataframe, not every date-county pair populates. Manually add in missing values
+full_dates <- seq.Date(as.IDate("2017-01-01"), as.IDate("2021-12-31"), by="days")
+full_counties <- unique(fec_cleaned$COUNTY)
+county_date_pairs <- expand.grid(full_dates, full_counties) %>% 
+  rename(TRANSACTION_DT = Var1, COUNTY = Var2) %>% 
+  mutate(TRANSACTION_DT = as.Date(TRANSACTION_DT))
+missing <- anti_join(county_date_pairs, fec_total_daily_county_count[,c("TRANSACTION_DT","COUNTY")])
+# append missing 
+missing <- missing %>% 
+  mutate(number_donations = 0, 
+         amount_donations = 0,
+         year = NA,
+         R = NA, 
+         D = NA,
+         week_id = 0)
+fec_total_daily_county_count <- rbind(fec_total_daily_county_count, missing)
+
+# 2) Amount of daily donations per county
+fec_total_daily_county_amount <- summarize_fec_amount(fec_cleaned, TRANSACTION_DT, TRUE)
+# add identifiers
+fec_total_daily_county_amount <- fec_total_daily_county_amount %>% 
+  mutate(number_donations = NA, year = NA, R = NA, D = NA, week_id = 0)
+# Since not every date has a donation across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(fec_total_daily_county_count[,c("TRANSACTION_DT","COUNTY")], fec_total_daily_county_amount[,c("TRANSACTION_DT","COUNTY")])
+# append missing 
+missing <- missing %>% 
+  mutate(number_donations = 0, 
+         amount_donations = 0,
+         year = NA,
+         R = NA, 
+         D = NA,
+         week_id = 0)
+fec_total_daily_county_amount <- rbind(fec_total_daily_county_amount, missing)
+
+# 3) Number and amount of daily donations per county for Republicans
+fec_total_daily_county_R <- fec_total_county_party(fec_cleaned, "R",
+                                                   TRANSACTION_DT, "TRANSACTION_DT", TRUE)
+# add identifiers
+fec_total_daily_county_R <- fec_total_daily_county_R %>% 
+  mutate(year = NA, R = 1, D = NA, week_id = 0)
+# Since not every date has a donation across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(fec_total_daily_county_count[,c("TRANSACTION_DT","COUNTY")], fec_total_daily_county_R[,c("TRANSACTION_DT","COUNTY")])
+# append missing 
+missing <- missing %>% 
+  mutate(number_donations = 0, 
+         amount_donations = 0,
+         year = NA,
+         R = 1, 
+         D = NA,
+         week_id = 0)
+fec_total_daily_county_R <- rbind(fec_total_daily_county_R, missing)
+
+# 4) Number and amount of daily donations per county for Democrats
+fec_total_daily_county_D <- fec_total_county_party(fec_cleaned, "D",
+                                                   TRANSACTION_DT, "TRANSACTION_DT", TRUE)
+# add identifiers
+fec_total_daily_county_D <- fec_total_daily_county_D %>% 
+  mutate(year = NA, R = NA, D = 1, week_id = 0)
+# Since not every date has a donation across the dataframe, not every date-county pair populates. Manually add in missing values
+missing <- anti_join(fec_total_daily_county_count[,c("TRANSACTION_DT","COUNTY")], fec_total_daily_county_D[,c("TRANSACTION_DT","COUNTY")])
+# append missing 
+missing <- missing %>% 
+  mutate(number_donations = 0, 
+         amount_donations = 0,
+         year = NA,
+         R = NA, 
+         D = 1,
+         week_id = 0)
+fec_total_daily_county_D <- rbind(fec_total_daily_county_D, missing)
+
+##### Combine Daily Donation Data
+fec_total_daily <- rbind(fec_total_daily_county_count, fec_total_daily_county_amount,
+                          fec_total_daily_county_R, fec_total_daily_county_D)
+# rename date
+fec_total_daily <- fec_total_daily %>% 
+  rename(date = TRANSACTION_DT)
+
+# remove extra df
+rm(fec_total_daily_county_count, fec_total_daily_county_amount,
+   fec_total_daily_county_R, fec_total_daily_county_D, missing)
+
+########## combine weekly and daily data
+fec_weekly_daily <- rbind(fec_total_weekly, fec_total_daily)
+
+# write csv
+write.csv(fec_weekly_daily, "\\fec_weekly_daily.csv", row.names = FALSE)
+
+```
+
+Four datasets for daily analysis are combined into one dataframe, `fec_total_daily`:
+
+ - `fec_total_daily_county_count`
+ - `fec_total_daily_county_amount`
+ - `fec_total_daily_county_R`
+ - `fec_total_daily_county_D`
+ 
+Finally, `fec_total_daily` and `fec_total_weekly` are combined into one final dataframe, `fec_weekly_daily`.
+
+
+
+
+## Part V: Aggregate Individual-level FEC Data BY DAY (2020 only; for RDD and IV analysis)
+
+In part V, I aggregate the FEC individual-level donations by day across the whole country for 2020 only. This data is used for the instrumental variable analysis (and RDD) that uses the killing of George Floyd as an exogenous shock that increased protests across the country. As a result, I examine donations before and after the killing. Additionally, I assess comparative (standardized) donation rates for various groups before and after the killing. Final dataset is `fec_2020_daily_full`.
+
+
+```{r Function to aggregate FEC donations by day for various groupings}
+
+# Aggregate Donations Per Day By Group
+fec_2020_grouped <- function(data) {
+  
+  ##### Aggregate donation data by day and create day variable indicating time around Floyd murder
+  
+  # Number of daily donations
+  fec_2020_count_all <- data %>%
+    # filter for just 2020
+    filter(year == "2020") %>%
+    mutate(# create indicator for Floyd's killing
+           floyd = as.Date("05-25-2020", format = "%m-%d-%Y"),
+           # Get distance from Floyds killing
+           days = difftime(TRANSACTION_DT, floyd, units = "days"),
+           # Create indicator if after the Floyd murder
+           after = as.factor(case_when(days > 0 ~ 1, TRUE ~ 0))) %>%
+    arrange(days) 
+  
+  # Do same thing as above but create separate table for transaction amounts rather than count
+  fec_2020_amount_all <- data %>%
+    # filter for just 2020 and limit to donations under 3000
+    filter(year == "2020",
+           TRANSACTION_AMT < 3001 & TRANSACTION_AMT > 0) %>% 
+    mutate(# create indicator for Floyd's killing
+          floyd = as.Date("05-25-2020", format = "%m-%d-%Y"),
+          # Get distance from Floyds killing
+          days = difftime(TRANSACTION_DT, floyd, units = "days"),
+          # Create indicator if after the Floyd murder
+          after = as.factor(case_when(days > 0 ~ 1, TRUE ~ 0))) %>%
+    arrange(days)
+  
+  # filter for non NA values across certain variables
+  fec_2020_count <- fec_2020_count_all %>%
+    filter(!is.na(incumbent), !is.na(challenger), !is.na(africanamerican),
+           !is.na(white), !is.na(democrat), !is.na(republican))
+  fec_2020_amount <- fec_2020_amount_all %>%
+    filter(!is.na(incumbent), !is.na(challenger), !is.na(africanamerican),
+           !is.na(white), !is.na(democrat), !is.na(republican))
+  
+  ######### Primary Datasets
+  ##### 1) group total - number of donations by day
+  fec_total_count <- fec_2020_count_all %>%
+    group_by(days, after) %>%
+    summarize(number_donations = n())
+  
+  ##### 2) group total - amount of donations by day
+  fec_total_amount <- fec_2020_amount_all %>%
+    group_by(days, after) %>%
+    summarize(amount_donations = sum(TRANSACTION_AMT))
+  
+  ### Now, calculate the number and amount of daily FEC donations made by various groups
+  # NOTE: See the helper functions below
+  
+  ######### Secondary Datasets
+  # Group - Republican
+  FEC_2020_R_count <- daily_grouped_count(fec_2020_count, republican)
+  FEC_2020_R_amount <- daily_grouped_amount(fec_2020_amount, republican)
+  # Group - Democrat
+  FEC_2020_D_count <- daily_grouped_count(fec_2020_count, democrat)
+  FEC_2020_D_amount <- daily_grouped_amount(fec_2020_amount, democrat)
+  # Group - Incumbent
+  FEC_2020_incum_count <- daily_grouped_count(fec_2020_count, incumbent)
+  FEC_2020_incum_amount <- daily_grouped_amount(fec_2020_amount, incumbent)
+  # Group - Challenger
+  FEC_2020_chal_count <- daily_grouped_count(fec_2020_count, challenger)
+  FEC_2020_chal_amount <- daily_grouped_amount(fec_2020_amount, challenger)
+  # Group - White
+  FEC_2020_white_count <- daily_grouped_count(fec_2020_count, white)
+  FEC_2020_white_amount <- daily_grouped_amount(fec_2020_amount, white)
+  # Group - Black
+  FEC_2020_black_count <- daily_grouped_count(fec_2020_count, africanamerican)
+  FEC_2020_black_amount <- daily_grouped_amount(fec_2020_amount, africanamerican)
+  ### Two group interactions
+  # Group -Democrat x incumbent
+  fec_dem_incum_count <- daily_interaction_count(fec_2020_count, democrat, incumbent)
+  fec_dem_incum_amount <- daily_interaction_amount(fec_2020_amount, democrat, incumbent)
+  # Group -Democrat x challenger
+  fec_dem_chal_count <- daily_interaction_count(fec_2020_count, democrat, challenger)
+  fec_dem_chal_amount <- daily_interaction_amount(fec_2020_amount, democrat, challenger)
+  # Group -Democrat x black
+  fec_dem_black_count <- daily_interaction_count(fec_2020_count, democrat, africanamerican)
+  fec_dem_black_amount <- daily_interaction_amount(fec_2020_amount, democrat, africanamerican)
+  # Group -Democrat x white
+  fec_dem_white_count <- daily_interaction_count(fec_2020_count, democrat, white)
+  fec_dem_white_amount <- daily_interaction_amount(fec_2020_amount, democrat, white)
+  # Group -Republican x incumbent
+  fec_rep_incum_count <- daily_interaction_count(fec_2020_count, republican, incumbent)
+  fec_rep_incum_amount <- daily_interaction_amount(fec_2020_amount, republican, incumbent)
+  # Group -Republican x challenger
+  fec_rep_chal_count <- daily_interaction_count(fec_2020_count, republican, challenger)
+  fec_rep_chal_amount <- daily_interaction_amount(fec_2020_amount, republican, challenger)
+  # Group -Republican x black
+  fec_rep_black_count <- daily_interaction_count(fec_2020_count, republican, africanamerican)
+  fec_rep_black_amount <- daily_interaction_amount(fec_2020_amount, republican, africanamerican)
+  # Group -Republican x white
+  fec_rep_white_count <- daily_interaction_count(fec_2020_count, republican, white)
+  fec_rep_white_amount <- daily_interaction_amount(fec_2020_amount, republican, white)
+  # Group -Black x incumbent
+  fec_black_incumbent_count <- daily_interaction_count(fec_2020_count, africanamerican, incumbent)
+  fec_black_incumbent_amount <- daily_interaction_amount(fec_2020_amount, africanamerican, incumbent)
+  # Group -Black x challenger
+  fec_black_chal_count <- daily_interaction_count(fec_2020_count, africanamerican, challenger)
+  fec_black_chal_amount <- daily_interaction_amount(fec_2020_amount, africanamerican, challenger)
+  # Group -White x incumbent
+  fec_white_incumbent_count <- daily_interaction_count(fec_2020_count, white, incumbent)
+  fec_white_incumbent_amount <- daily_interaction_amount(fec_2020_amount, white, incumbent)
+  # Group - White x challenger
+  fec_white_incumbent_count <- daily_interaction_count(fec_2020_count, white, challenger)
+  fec_white_incumbent_amount <- daily_interaction_amount(fec_2020_amount, white, challenger)
+  
+  # combine all the grouped data into a single dataset
+  fec_2020_daily_full <- bind_rows(
+                                   # Primary Datasets
+                                   fec_total_count, 
+                                   fec_total_amount, 
+                                   # Supplemental Datasets
+                                   FEC_2020_R_count,
+                                   FEC_2020_R_amount, 
+                                   FEC_2020_D_count, 
+                                   FEC_2020_D_amount,
+                                   FEC_2020_incum_count,
+                                   FEC_2020_incum_amount,
+                                   FEC_2020_chal_count,
+                                   FEC_2020_chal_amount,
+                                   FEC_2020_white_count,
+                                   FEC_2020_white_amount,
+                                   FEC_2020_black_count,
+                                   FEC_2020_black_amount,
+                                   fec_dem_incum_count,
+                                   fec_dem_incum_amount,
+                                   fec_dem_chal_count,
+                                   fec_dem_chal_amount,
+                                   fec_dem_black_count,
+                                   fec_dem_black_amount,
+                                   fec_dem_white_count,
+                                   fec_dem_white_amount,
+                                   fec_rep_incum_count,
+                                   fec_rep_incum_amount,
+                                   fec_rep_chal_count,
+                                   fec_rep_chal_amount,
+                                   fec_rep_black_count,
+                                   fec_rep_black_amount,
+                                   fec_rep_white_count,
+                                   fec_rep_white_amount,
+                                   fec_black_incumbent_count,
+                                   fec_black_incumbent_amount,
+                                   fec_black_chal_count,
+                                   fec_black_chal_amount,
+                                   fec_white_incumbent_count,
+                                   fec_white_incumbent_amount)
+  return(fec_2020_daily_full)
+}
+```
+
+```{r Helper Functions - Daily Aggregations by Group(s)}
+# daily count of donations BY GIVEN GROUP
+daily_grouped_count <- function(data, group){
+  out <- data %>%
+    # group by day, after, and given group
+    group_by(days, after, {{group}}) %>%
+    # count daily number of donations made by given group
+    summarize(number_donations= n()) %>% 
+    ungroup() %>% 
+    # create every combination of day and group
+    tidyr::complete(days,{{group}}) %>% 
+    # fill NA values with 0 (since not every day has donations... the NAs come from complete())
+    replace_na(list(number_donations = 0))  %>% 
+    # cast after to factor
+    mutate(after = as.factor(case_when(as.numeric(days) > 0 ~ 1, TRUE ~ 0))) 
+  
+  ### standardize donations by given variable
+  out_wide <- out %>% 
+    # pivot donations wider by group
+    pivot_wider(names_from = {{group}}, values_from = number_donations)
+  # change column names
+  colnames(out_wide) <- c("days","after","value_0","value_1")
+  # standardize donation amounts by group
+  out_wide <- out_wide %>% 
+    mutate(value_0 = scale(value_0),
+           value_1 = scale(value_1)) %>% 
+    # change data back to long format
+    pivot_longer(cols = starts_with("value"), names_to = "name", values_to = "number_donations_standardized") %>% 
+    select(4)
+  # combine normal data with standardized data
+  out <- cbind(out,out_wide)
+  
+  return(out)
+}
+
+# daily amount of donations BY GIVEN GROUP
+daily_grouped_amount <- function(data, group){
+  out <- data %>%
+    # group by day, after, and given group
+    group_by(days, after, {{group}}) %>%
+    # total daily amount of donations made by given group
+    summarize(amount_donations = sum(TRANSACTION_AMT)) %>% 
+    ungroup() %>% 
+    # create every combination of day and group
+    tidyr::complete(days,{{group}}) %>% 
+    # fill NA values with 0 (since not every day has donations... the NAs come from complete())
+    replace_na(list(amount_donations=0)) %>% 
+    # cast after to factor
+    mutate(after = as.factor(case_when(as.numeric(days) > 0 ~ 1, TRUE ~ 0)))
+  
+  ### standardize donations by given variable
+  out_wide <- out %>% 
+    # pivot donations wider by group
+    pivot_wider(names_from = {{group}}, values_from = amount_donations)
+  # change column names
+  colnames(out_wide) <- c("days","after","value_0","value_1")
+  # standardize donation amounts by group
+  out_wide <- out_wide %>% 
+    mutate(value_0 = scale(value_0),
+           value_1 = scale(value_1)) %>% 
+    # change data back to long format
+    pivot_longer(cols = starts_with("value"), names_to = "name", values_to = "amount_donations_standardized") %>% 
+    select(4)
+  # combine normal data with standardized data
+  out <- cbind(out,out_wide)
+  
+  return(out)
+}
+
+# Daily count of donations by two given groups
+daily_interaction_count <- function(data, group1, group2){
+  out <- data %>%
+    # group by day, after, and 2 given groups
+    group_by(days, after, {{group1}},{{group2}}) %>%
+    # count daily number of donations made by 2 given groups
+    summarize(number_donations= n()) %>% 
+    ungroup() %>% 
+    # create every combination of day and group
+    tidyr::complete(days,{{group1}},{{group2}}) %>% 
+    # fill NA values with 0 (since not every day has donations... the NAs come from complete())
+    replace_na(list(number_donations = 0))  %>% 
+    # cast after to factor
+    mutate(after = as.factor(case_when(days > 0 ~ 1, TRUE ~ 0)))
+  
+  ### standardize donations by 2 given variables
+  out_wide <- out %>% 
+    # pivot donations wider by 2 groups
+    pivot_wider(names_from = c({{group1}},{{group2}}), values_from = number_donations)
+  # change column names
+  colnames(out_wide) <- c("days","after","value_0_0","value_0_1","value_1_0","value_1_1")
+  # standardize donation amounts by 2 groups
+  out_wide <- out_wide %>%
+    mutate(value_0_0 = scale(value_0_0),
+           value_0_1 = scale(value_0_1),
+           value_1_0 = scale(value_1_0),
+           value_1_1 = scale(value_1_1)) %>%
+    # change data back to long format
+    pivot_longer(cols = starts_with("value"), names_to = "name", values_to = "number_donations_standardized") %>% 
+    select(4)
+  # combine normal data with standardized data
+  out <- cbind(out,out_wide)
+  
+  return(out)
+}
+
+# daily amount of donations by two given groups
+daily_interaction_amount <- function(data, group1, group2){
+  out <- data %>%
+    # group by day, after, and 2 given groups
+    group_by(days, after, {{group1}},{{group2}}) %>%
+    # total daily amount of donations made by 2 given groups
+    summarize(amount_donations = sum(TRANSACTION_AMT)) %>% 
+    ungroup() %>% 
+    # create every combination of day and group
+    tidyr::complete(days,{{group1}},{{group2}}) %>%
+    # fill NA values with 0 (since not every day has donations... the NAs come from complete())
+    replace_na(list(amount_donations=0)) %>% 
+    # cast after to factor
+    mutate(after = as.factor(case_when(days > 0 ~ 1, TRUE ~ 0)))
+  
+  ### standardize donations by 2 given variables
+  out_wide <- out %>% 
+    # pivot donations wider by 2 groups
+    pivot_wider(names_from = c({{group1}},{{group2}}), values_from = amount_donations)
+  # change column names
+  colnames(out_wide) <- c("days","after","value_0_0","value_0_1","value_1_0","value_1_1")
+  # standardize donation amounts by 2 groups
+  out_wide <- out_wide %>%
+    mutate(value_0_0 = scale(value_0_0),
+           value_0_1 = scale(value_0_1),
+           value_1_0 = scale(value_1_0),
+           value_1_1 = scale(value_1_1)) %>%
+    # change data back to long format
+    pivot_longer(cols = starts_with("value"), names_to = "name", values_to = "amount_donations_standardized") %>% 
+    select(4)
+  # combine normal data with standardized data
+  out <- cbind(out,out_wide)
+  return(out)
+}
+
+
+```
+
+```{r}
+# Note: this code block takes around 15 minutes to run
+
+# Grouped Daily Donations (Count & Amount) (2020)
+
+# Groups:
+# Democrat, Republican, Incumbent, Challenger, Black, White, Protest activity
+
+# Interaction Groupings: 
+# Democrat x incumbent, Democrat x challenger, Democrat x black, Democrat x white
+# Republican x incumbent, Republican x challenger, Republican x black, Republican x white, 
+# Black x incumbent, Black x challenger, White x incumbent, White x challenger
+fec_2020_daily_full <- fec_2020_grouped(fec_cleaned)
+write.csv(fec_2020_daily_full, "\\fec_2020_daily_full.csv", row.names = FALSE)
+
+```
+
