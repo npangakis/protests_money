@@ -24,8 +24,6 @@ editor_options:
 
 # Overview - Data Analysis
 
-Last Updated: 9.12.22
-
 How do protests influence American political behavior? This project investigates how political protests affect an individual's willingness to donate money to a federal political campaign. In this markdown, I describe the data analyses associated with this project. 
 
 The analyses below draws on various data tables:
@@ -48,7 +46,7 @@ pacman::p_load(tidyverse, RCurl, here,
                data.table, bit64, stringr,
                readxl, tidyr, usmap, zoo,
                lubridate, scales, fixest,
-               gridExtra, rdd)
+               gridExtra, rdd, xtable)
 ```
 
 # Exploratory Data Analysis
@@ -513,75 +511,89 @@ fec_weekly_daily<- fread("fec_weekly_daily.csv")
 # 1) `protest_weekly_all`: The number of weekly protests that occur in an American county for every year from 2017 to 2021 (ID is weekly = 1).
 protest_weekly_all <- protest_data_full %>% 
   filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 2) `protest_daily_all`: The number of daily protests that occur in an American county for every year from 2017 to 2021 (ID is weekly = 0).
 protest_daily_all <- protest_data_full %>%
   filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 3) `protest_weekly_large`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people (ID is weekly = 1 and large = 1). 
 protest_weekly_large <- protest_data_full %>% 
   filter(weekly == 1, large == 1, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 4) `protest_daily_large` is the same as `protest_weekly_large` but with daily protest data (ID is weekly = 0 and large = 1).
 protest_daily_large <- protest_data_full %>%
   filter(weekly == 0, large == 1, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 5) `protest_grouped_week_liberal`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and are labeled as liberal protests (ID is weekly = 1 and liberal = 1). 
 protest_grouped_week_liberal <- protest_data_full %>% 
   filter(weekly == 1, large == 0, liberal == 1, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 6) `protest_grouped_daily_liberal` is the same as `protest_grouped_week_liberal` but with daily data (ID is weekly = 0 and liberal = 1).
 protest_grouped_daily_liberal <- protest_data_full %>%
   filter(weekly == 0, large == 0, liberal == 1, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 7) `protest_grouped_week_conservative`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and are labeled as conservative protests (ID is weekly = 1 and conservative = 1).
 protest_grouped_week_conservative <- protest_data_full %>% 
   filter(weekly == 1, large == 0, liberal == 0, conservative == 1,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 8) `protest_grouped_daily_conservative` is the same as `protest_grouped_week_conservative` but daily data (ID is weekly = 0 and conservative = 1).
 protest_grouped_daily_conservative <- protest_data_full %>%
   filter(weekly == 0, large == 0, liberal == 0, conservative == 1,
-         onlyprotest == 0, norallies == 0, salient == 0)
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 ### Supplemental dataframes: 
 
 # 9) `protest_weekly_onlyprotests`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and only includes protest activities explicitly labeled as "protests." (ID is weekly = 1 and onlyprotest = 1). 
 protest_weekly_onlyprotests <- protest_data_full %>% 
   filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 1, norallies == 0, salient == 0)
+         onlyprotest == 1, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 10) `protest_daily_onlyprotests` is the same as `protest_weekly_onlyprotests` but daily (ID is weekly = 0 and onlyprotest = 1).
 protest_daily_onlyprotests <- protest_data_full %>%
   filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 1, norallies == 0, salient == 0)
+         onlyprotest == 1, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 11) `protest_weekly_norallies`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and excludes any protest activities explicitly labeled as "rallies." (ID is weekly = 1 and norallies = 1).
 protest_weekly_norallies <- protest_data_full %>% 
   filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 1, salient == 0)
+         onlyprotest == 0, norallies == 1, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 # 12) `protest_daily_norallies` is the same as `protest_weekly_norallies` but daily (ID is weekly = 0 and norallies = 1).
 protest_daily_norallies <- protest_data_full %>%
   filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 1, salient == 0)
+         onlyprotest == 0, norallies == 1, salient == 0) %>% 
+  rename("number_protests" = "n")
 
 
 # 13) `protest_weekly_salient`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and only includes protest activities resulting in an arrest, property damage, or injuries. (ID is weekly = 1 and salient = 1).
 protest_weekly_salient <- protest_data_full %>% 
   filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 1)
+         onlyprotest == 0, norallies == 0, salient == 1) %>% 
+  rename("number_protests" = "n")
 
 # 14) `protest_daily_salient` is the same as `protest_weekly_salient` but daily (ID is weekly = 0 and salient = 1).
 protest_daily_salient <- protest_data_full %>%
   filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
-         onlyprotest == 0, norallies == 0, salient == 1)
+         onlyprotest == 0, norallies == 0, salient == 1) %>% 
+  rename("number_protests" = "n")
 
 ```
 
@@ -636,7 +648,7 @@ fec_total_daily_county_D <- fec_weekly_daily %>%
 
 ```
 
-# Analysis I: RDD and IV
+# Analysis I: RDD
 
 ```{r}
 # Subset daily donation data
@@ -657,6 +669,73 @@ amount_daily_donations_full <- fec_2020_daily_full %>%
   select(days, after, amount_donations) %>% 
   # Restrict data to 90 days before and 90 days after the killing
   filter(days > -91 & days < 91)
+```
+
+### Main plot
+
+```{r}
+protest_daily_2020 <- protest_data_full %>% 
+  filter(weekly == 0, large == 1,
+         liberal == 0, conservative == 0, 
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  mutate(date = as.Date(date)) %>% 
+  filter(between(date, as.Date("2020-05-04"), as.Date("2020-06-15"))) %>% 
+  group_by(date) %>% 
+  summarise(n_total = sum(n))
+
+donations_plot <- amount_daily_donations_full %>% 
+  filter(days > -22 & days < 22) %>% 
+  mutate(days = as.factor(days),
+         after = as.factor(after))
+
+plot <- cbind(protest_daily_2020, donations_plot)
+
+plot %>% 
+  ggplot() +
+  geom_point(aes(x = days, 
+                 y = amount_donations)) +
+  geom_col(aes(x = as.numeric(days), y = n_total*54660)) +
+  geom_smooth(aes(x = as.numeric(days),
+                  y =  amount_donations,
+                  linetype = after),
+              size = 1, color = "red") +
+  geom_vline(xintercept = which(levels(plot$days) %in% '0'), 
+             linetype= "longdash") +
+  theme(legend.position = "none") +
+  labs(title = "Federal Campaign Contributions and Political Protests") +
+  scale_x_discrete(breaks = seq(-21, 21, by = 3), 
+                   name = "Days since Murder of George Floyd") +
+  scale_y_continuous("Amount of Daily Donations",
+                     breaks = seq(0, 36000000, by = 6000000),
+                     limits = c(0,36000000),
+                     labels = scales::dollar_format()) +
+  theme(axis.text.x = element_text(hjust = 1,
+                                   angle = 60)) +
+  geom_label(
+    label="# of Daily Protests", 
+    x=which(levels(plot$days) %in% '9'),
+    y=6000000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 3
+  ) +
+  geom_label(
+    label="Highest # of Daily Protests = 472", 
+    x=which(levels(plot$days) %in% '12'),
+    y=31000000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 3
+  ) +
+  annotate("segment", x = which(levels(plot$days) %in% '12'), 
+           y = 30000000, xend = which(levels(plot$days) %in% '12'), 
+           yend = 26600000, 
+         size = 2, linejoin = "mitre",color = "#56B4E9",
+         arrow = arrow(type = "closed", length = unit(0.01, "npc")))
 ```
 
 
@@ -693,16 +772,22 @@ plot_coef <- plot_coef %>%
 bw_amount <- IKbandwidth(X = amount_daily_donations_full$days, 
                         Y = amount_daily_donations_full$amount_donations, cutpoint = 0)
 bw_amount_dta <-subset(amount_daily_donations_full, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Number (optimal)
-lout_optimal <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
+# Full Data - Amount (optimal)
+lout_optimal_all <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
+summary(lout_optimal_all)
+# Full Data - Amount (optimal) LOG
+lout_optimal_all <- lm(log(amount_donations) ~ days + I(days > 0), data = bw_amount_dta)
+summary(lout_optimal_all)
 
 plot_coef$optimal <- 0
 plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
 
 # number of significant window sizes
-nrow(mat[mat[,"pvalue"] < 0.051,])
-
+print(nrow(mat[mat[,"pvalue"] < 0.051,]))
+# Mean coefficient
+print(summary(mat[,"coefficient"]))
+# mean pvalue
+print(summary(mat[,"pvalue"]))
 # Plot --------------------------------------------------------------------
 ggplot(plot_coef, aes(x = window_size, y = coefficient,color=as.factor(optimal))) +
   geom_point(size = 2) +
@@ -731,7 +816,7 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient,color=as.factor(optimal))
   )
 ```
 
-All are positively signed. 54 out of 86 bandwidths show statistically significant increases. 
+All are positively signed. 54 out of 86 bandwidths show statistically significant increases. Mean coefficient is 7234058 and median is 6847223. Mean p-value is 0.08 and the median p-value is 0.03.
 
 ### Window Plot - Donation Number
 
@@ -775,6 +860,10 @@ plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_count), 1, 0)
 
 # number of significant window sizes
 nrow(mat[mat[,"pvalue"] < 0.051,])
+# Mean coefficient
+print(summary(mat[,"coefficient"]))
+# mean pvalue
+print(summary(mat[,"pvalue"]))
 
 # Plot --------------------------------------------------------------------
 ggplot(plot_coef, aes(x = window_size, y = coefficient,color=as.factor(optimal))) +
@@ -804,7 +893,7 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient,color=as.factor(optimal))
   )
 ```
 
-30 out of 86 bandwidths show statistically significant increases. 
+All positive. 30 out of 86 bandwidths show statistically significant increases. Mean coefficient is 43378 and median is 35897. Mean p-value is 0.124 and the median p-value is 0.086.
 
 ### Varying Thresholds - Amount of donations 
 
@@ -880,6 +969,11 @@ sum(plot_coef$significant) # 23 out of 141
 # number of positive significant coefficients
 nrow(plot_coef[plot_coef[,"significant"] == 1 & plot_coef[,"coefficient"] > 0, ]) # 10 of of 141
 
+# Mean coefficient
+print(summary(plot_coef[,"coefficient"]))
+# mean pvalue
+print(summary(plot_coef[,"pvalue"]))
+
 # change x axis
 xaxis <- seq.Date(as.IDate("2020-03-16"), as.IDate("2020-08-03"), by="days")
 
@@ -912,6 +1006,7 @@ ggplot(plot_coef, aes(x = xaxis, y = coefficient,color=as.factor(significant))) 
     size = 2.5
   )
 ```
+Number of significant coefficients is 23 out of 141. Number of positive significant coefficients 10 of of 141. Mean coefficient is 382188 and median is 1741858. Mean p-value is 0.353 and the median p-value is 0.401.
 
 First increase: mid to late March in 2020, which is right when Covid lockdowns began. Second increase: mid-April 2020 is when Sanders drops out of Presidential Race and Biden becomes main Democratic candidate. Third increase is killing of George Floyd. Large decrease in late June and early July is plausibly the aftermath of increased donation behavior in the month prior. 
 
@@ -1000,6 +1095,7 @@ ggplot(plot_coef, aes(x = xaxis, y = coefficient,color=as.factor(significant))) 
     size = 2.5
   )
 ```
+
 ### Robustness Check: Adding Polynomials
 
 ```{r}
@@ -1062,7 +1158,25 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient)) +
   
 ```
 
+### Robustness Check: Poisson and Negative Binomial
+
+```{r}
+library(MASS)
+### Poisson - amount per day
+lout_poisson <-
+  glm(amount_donations ~ days + I(days > 0), family = "poisson", data = bw_amount_dta)
+summary(lout_poisson)
+
+### negative binomial - amount per day
+lout_nb <- glm.nb(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
+summary(lout_nb)
+detach("package:MASS", unload=TRUE)
+
+```
+
+
 ### Subgroup Analysis:
+
 ```{r}
 rm(data)
 # function to analyze window plots
@@ -1111,8 +1225,6 @@ window_plot <- function(data, amount, std){
 }
 ```
 
-#### Democrats
-
 ```{r}
 ##### Preprocess data
 
@@ -1132,125 +1244,7 @@ data_dem_amount_std <- fec_2020_daily_full %>%
   filter(democrat == 1,
          days > -91 & days < 91) 
 
-# Democrats - number 
-data_dem_num <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & !is.na(democrat) & is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations, democrat) %>% 
-  filter(democrat == 1,
-         days > -91 & days < 91) 
-
-# Democrats - number standardized
-data_dem_num_std <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & !is.na(democrat) & is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations_standardized, democrat) %>% 
-  filter(democrat == 1,
-         days > -91 & days < 91)
-
-```
-
-```{r}
-##### Amount
-plot_coef <- window_plot(data_dem_amount, TRUE, FALSE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_dem_amount$days,
-                        Y = data_dem_amount$amount_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_dem_amount, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Amount (optimal)
-lout_optimal <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
-
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
-
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  scale_y_continuous(labels = scales::dollar_format()) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Political Protests on Liberal Donation Behavior") +
-  ylab("Increase in Federal Donations to Democrats") +
-  geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 31 Days Coefficient: $2,617,291, P-Value: 0.004",46), 
-    x=31,
-    y=5500000,
-    label.padding = unit(0.1, "lines"), # Rectangle size around label
-    label.size = NA,
-    color = "black",
-    fill="#56B4E9",
-    size = 2.5
-  )
-```
-
-69 of 85 windows significant. 
-
-```{r}
-##### Count
-plot_coef <- window_plot(data_dem_num, FALSE,FALSE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_dem_num$days,
-                        Y = data_dem_num$number_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_dem_num, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Amount (optimal)
-lout_optimal <- lm(number_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
-
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
-
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  scale_y_continuous(labels = scales::number_format(accuracy = 1L,
-                                                    big.mark = ",")) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Political Protests on Liberal Donation Behavior") +
-  ylab("Increase in Federal Donations to Democrats") +
-  geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 81 Days Coefficient: 1790, P-Value: 0.7",46), 
-    x=68,
-    y=17000,
-    label.padding = unit(0.1, "lines"), # Rectangle size around label
-    label.size = NA,
-    color = "black",
-    fill="#56B4E9",
-    size = 2.5
-  )
-```
-
-31 out of 90 significant
-
-#### Republicans
-
-```{r}
-##### Preprocess data
-
-# Rep - amount
+# Republican - amount
 data_rep_amount <- fec_2020_daily_full %>% 
   filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
            is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
@@ -1258,217 +1252,13 @@ data_rep_amount <- fec_2020_daily_full %>%
   filter(republican == 1,
          days > -91 & days < 91) 
 
-# Rep - amount standardized
+# Republican - amount standardized
 data_rep_amount_std <- fec_2020_daily_full %>% 
   filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
            is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
   select(days, amount_donations_standardized, republican) %>% 
   filter(republican == 1,
          days > -91 & days < 91) 
-
-# Rep - number 
-data_rep_num <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations, republican) %>% 
-  filter(republican == 1,
-         days > -91 & days < 91) 
-
-# Rep - number standardized
-data_rep_num_std <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations_standardized, republican) %>% 
-  filter(republican == 1,
-         days > -91 & days < 91)
-
-```
-
-```{r}
-##### Amount
-plot_coef <- window_plot(data_rep_amount, TRUE, FALSE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_rep_amount$days,
-                        Y = data_rep_amount$amount_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_rep_amount, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Amount (optimal)
-lout_optimal <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
-
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
-
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  scale_y_continuous(labels = scales::dollar_format()) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Political Protests on Conservative Donation Behavior") +
-  ylab("Increase in Federal Donations to Republicans") +
-  geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 32 Days Coefficient: $1,052,460, P-Value: 0.14",46), 
-    x=32,
-    y=4200000,
-    label.padding = unit(0.1, "lines"), # Rectangle size around label
-    label.size = NA,
-    color = "black",
-    fill="#56B4E9",
-    size = 2.5
-  )
-```
-
-37 of 85 windows significant. 
-
-```{r}
-##### Count
-plot_coef <- window_plot(data_rep_num, FALSE,FALSE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_rep_num$days,
-                        Y = data_rep_num$number_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_rep_num, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Amount (optimal)
-lout_optimal <- lm(number_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
-
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
-
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  scale_y_continuous(labels = scales::number_format(accuracy = 1L,
-                                                    big.mark = ",")) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Political Protests on Conservative Donation Behavior") +
-  ylab("Increase in Federal Donations to Republicans") +
-  geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 69 Days Coefficient: 5252, P-Value: 0.17",46), 
-    x=68,
-    y=17000,
-    label.padding = unit(0.1, "lines"), # Rectangle size around label
-    label.size = NA,
-    color = "black",
-    fill="#56B4E9",
-    size = 2.5
-  )
-```
-
-23 out of 90 significant
-
-#### Democrats v. Republicans
-
-```{r}
-##### Amount
-plot_coef <- window_plot(data_dem_amount_std, TRUE, TRUE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_dem_amount_std$days,
-                        Y = data_dem_amount_std$amount_donations_standardized, 
-                        cutpoint = 0)
-bw_amount_dta <-subset(data_dem_amount_std, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Amount (optimal)
-lout_optimal <- lm(amount_donations_standardized ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
-
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
-
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  #scale_y_continuous(labels = scales::dollar_format()) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Protests on (Standardized) Liberal Donation Behavior") +
-  ylab("Increase in Donations to Democrats")
-
-```
-
-
-
-```{r}
-##### Amount Rep - std
-plot_coef <- window_plot(data_rep_amount_std, TRUE, TRUE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_rep_amount_std$days,
-                        Y = data_rep_amount_std$amount_donations_standardized, cutpoint = 0)
-bw_amount_dta <-subset(data_rep_amount_std, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Amount (optimal)
-lout_optimal <- lm(amount_donations_standardized ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
-
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
-
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  # scale_y_continuous(labels = scales::dollar_format()) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Protests on (Standardized) Conservative Donation Behavior") +
-  ylab("Increase in Donations to Republicans") 
-  # geom_label(
-  #   label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 32 Days Coefficient: $1,052,460, P-Value: 0.14",46), 
-  #   x=32,
-  #   y=4200000,
-  #   label.padding = unit(0.1, "lines"), # Rectangle size around label
-  #   label.size = NA,
-  #   color = "black",
-  #   fill="#56B4E9",
-  #   size = 2.5
-  # )
-```
-
-#### Incumbent
-
-```{r}
-##### Preprocess data
 
 # Incumbent - amount
 data_inc_amount <- fec_2020_daily_full %>% 
@@ -1486,41 +1276,208 @@ data_inc_amount_std <- fec_2020_daily_full %>%
   filter(incumbent == 1,
          days > -91 & days < 91) 
 
-# Incumbent - number 
-data_inc_num <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
-           !is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations, incumbent) %>% 
-  filter(incumbent == 1,
+# Challenger - amount
+data_chall_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & !is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations, challenger) %>% 
+  filter(challenger == 1,
          days > -91 & days < 91) 
 
-# Incumbent - number standardized
-data_inc_num_std <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
-           !is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations_standardized, incumbent) %>% 
-  filter(incumbent == 1,
-         days > -91 & days < 91)
+# Challenger - amount standardized
+data_chall_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & !is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations_standardized, challenger) %>% 
+  filter(challenger == 1,
+         days > -91 & days < 91) 
+
+# African American - amount
+data_aa_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & !is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations, africanamerican) %>% 
+  filter(africanamerican == 1,
+         days > -91 & days < 91) 
+
+# African American - amount standardized
+data_aa_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & !is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations_standardized, africanamerican) %>% 
+  filter(africanamerican == 1,
+         days > -91 & days < 91) 
+
+# White - amount
+data_white_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & !is.na(white) ) %>% 
+  select(days, amount_donations, white) %>% 
+  filter(white == 1,
+         days > -91 & days < 91) 
+
+# White - amount standardized
+data_white_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & !is.na(white) ) %>% 
+  select(days, amount_donations_standardized, white) %>% 
+  filter(white == 1,
+         days > -91 & days < 91) 
 
 ```
+
+#### Democratic Candidates Only
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_dem_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_dem <- IKbandwidth(X = data_dem_amount$days,
+                        Y = data_dem_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_dem <- subset(data_dem_amount, days > 0 - bw_amount_dem & days < 0 + bw_amount_dem)
+# Full Data - Amount (optimal)
+lout_optimal_dem <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_dem)
+summary(lout_optimal_dem)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_dem), 1, 0)
+
+# number of significant window sizes
+nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+
+# Mean coefficient
+print(summary(plot_coef[,"coefficient"]))
+# mean pvalue
+print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to Democrats") +
+  ylab("Increase in Federal Donations to Democrats") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 31 Days Coefficient: $2,617,291, P-Value: 0.004",46), 
+    x=31,
+    y=5500000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+69 of 85 windows significant. Mean coefficient is 2827582 and median is 2717317. Mean p-value is 0.042 and the median p-value is 0.016.
+
+#### Republican Candidates Only
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_rep_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_rep <- IKbandwidth(X = data_rep_amount$days,
+                        Y = data_rep_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_rep <-subset(data_rep_amount, days > 0 - bw_amount_rep & days < 0 + bw_amount_rep)
+# Full Data - Amount (optimal)
+lout_optimal_rep <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_rep)
+summary(lout_optimal_rep)G
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_rep), 1, 0)
+
+# number of significant window sizes
+nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+
+# Mean coefficient
+print(summary(plot_coef[,"coefficient"]))
+# mean pvalue
+print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to Republicans") +
+  ylab("Increase in Federal Donations to Republicans") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 32 Days Coefficient: $1,052,460, P-Value: 0.14",46), 
+    x=32,
+    y=3700000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+37 of 85 windows significant. Mean coefficient is 1732282 and median is 1836606. Mean p-value is 0.158 and the median p-value is 0.060.
+
+#### Democrats v. Republicans
+
+```{r}
+# optimal bandwidth - Democrats
+bw_amount_dta_dem_std <-subset(data_dem_amount_std, 
+                           days > 0 - bw_amount_dem & days < 0 + bw_amount_dem)
+lout_optimal_dem_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_dem_std)
+summary(lout_optimal_dem_std)
+
+# optimal bandwidth - Republicans
+bw_amount_dta_rep_std <-subset(data_rep_amount_std, 
+                           days > 0 - bw_amount_rep & days < 0 + bw_amount_rep)
+lout_optimal_rep_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_rep_std)
+summary(lout_optimal_rep_std)
+
+```
+
+#### Incumbent Candidates
 
 ```{r}
 ##### Amount
 plot_coef <- window_plot(data_inc_amount, TRUE, FALSE)
 
-# optimal
-bw_amount <- IKbandwidth(X = data_inc_amount$days,
+# optimal bandwidth
+bw_amount_inc <- IKbandwidth(X = data_inc_amount$days,
                         Y = data_inc_amount$amount_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_inc_amount, days > 0 - bw_amount & days < 0 + bw_amount)
+bw_amount_dta_inc <-subset(data_inc_amount, 
+                           days > 0 - bw_amount_inc & days < 0 + bw_amount_inc)
 # Full Data - Amount (optimal)
-lout_optimal <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
+lout_optimal_inc <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_inc)
+summary(lout_optimal_inc)
 
 plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_inc), 1, 0)
 
 # number of significant window sizes
 nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+
+# Mean coefficient
+print(summary(plot_coef[,"coefficient"]))
+# mean pvalue
+print(summary(plot_coef[,"pvalue"]))
 
 # Plot --------------------------------------------------------------------
 ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
@@ -1538,9 +1495,9 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal)
        subtitle = "The Effect of Political Protests on Donations to Incumbents") +
   ylab("Increase in Federal Donations to Incumbents") +
   geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 28 Days Coefficient: $2,769,262, P-Value: 0.002",46), 
-    x=28,
-    y=3500000,
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 29 Days Coefficient: $2,769,262, P-Value: 0.002",46), 
+    x=29,
+    y=4300000,
     label.padding = unit(0.1, "lines"), # Rectangle size around label
     label.size = NA,
     color = "black",
@@ -1549,112 +1506,33 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal)
   )
 ```
 
-65 of 85 windows significant. 
+65 of 85 windows significant. Mean coefficient is 2602157 and median is 2591552. Mean p-value is 0.084 and the median p-value is 0.024.
 
-```{r}
-##### Count
-plot_coef <- window_plot(data_dem_num, FALSE,FALSE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_dem_num$days,
-                        Y = data_dem_num$number_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_dem_num, days > 0 - bw_amount & days < 0 + bw_amount)
-# Full Data - Amount (optimal)
-lout_optimal <- lm(number_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
-
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
-
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  scale_y_continuous(labels = scales::number_format(accuracy = 1L,
-                                                    big.mark = ",")) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Political Protests on Liberal Donation Behavior") +
-  ylab("Increase in Federal Donations to Democrats") +
-  geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 81 Days Coefficient: 1790, P-Value: 0.7",46), 
-    x=68,
-    y=17000,
-    label.padding = unit(0.1, "lines"), # Rectangle size around label
-    label.size = NA,
-    color = "black",
-    fill="#56B4E9",
-    size = 2.5
-  )
-```
-
-31 out of 90 significant
-
-#### Challenger
-
-```{r}
-##### Preprocess data
-
-# Rep - amount
-data_rep_amount <- fec_2020_daily_full %>% 
-  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, amount_donations, republican) %>% 
-  filter(republican == 1,
-         days > -91 & days < 91) 
-
-# Rep - amount standardized
-data_rep_amount_std <- fec_2020_daily_full %>% 
-  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, amount_donations_standardized, republican) %>% 
-  filter(republican == 1,
-         days > -91 & days < 91) 
-
-# Rep - number 
-data_rep_num <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations, republican) %>% 
-  filter(republican == 1,
-         days > -91 & days < 91) 
-
-# Rep - number standardized
-data_rep_num_std <- fec_2020_daily_full %>% 
-  filter(is.na(amount_donations) & !is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
-           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
-  select(days, number_donations_standardized, republican) %>% 
-  filter(republican == 1,
-         days > -91 & days < 91)
-
-```
+#### Challenger Candidates
 
 ```{r}
 ##### Amount
-plot_coef <- window_plot(data_rep_amount, TRUE, FALSE)
+plot_coef <- window_plot(data_chall_amount, TRUE, FALSE)
 
-# optimal
-bw_amount <- IKbandwidth(X = data_rep_amount$days,
-                        Y = data_rep_amount$amount_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_rep_amount, days > 0 - bw_amount & days < 0 + bw_amount)
+# optimal bandwidth
+bw_amount_chall <- IKbandwidth(X = data_chall_amount$days,
+                        Y = data_chall_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_chall <-subset(data_chall_amount, 
+                       days > 0 - bw_amount_chall & days < 0 + bw_amount_chall)
 # Full Data - Amount (optimal)
-lout_optimal <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
+lout_optimal_chall <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_chall)
+summary(lout_optimal_chall)
 
 plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_chall), 1, 0)
 
 # number of significant window sizes
 nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+
+# Mean coefficient
+print(summary(plot_coef[,"coefficient"]))
+# mean pvalue
+print(summary(plot_coef[,"pvalue"]))
 
 # Plot --------------------------------------------------------------------
 ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
@@ -1669,12 +1547,12 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal)
   scale_x_continuous("Window Size (Days)",
                      breaks = seq(0, 90, by = 15)) +
   labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Political Protests on Conservative Donation Behavior") +
-  ylab("Increase in Federal Donations to Republicans") +
+       subtitle = "The Effect of Political Protests on Donations to Challengers") +
+  ylab("Increase in Federal Donations to Challengers") +
   geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 32 Days Coefficient: $1,052,460, P-Value: 0.14",46), 
-    x=32,
-    y=4200000,
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 61 Days Coefficient: $1,640,828, P-Value: 0.043",46), 
+    x=61,
+    y=2500000,
     label.padding = unit(0.1, "lines"), # Rectangle size around label
     label.size = NA,
     color = "black",
@@ -1683,76 +1561,54 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal)
   )
 ```
 
-37 of 85 windows significant. 
+36 of 85 windows significant. Mean coefficient is 1524017 and median is 1413897. Mean p-value is 0.102 and the median p-value is 0.074.
+
+#### Incumbents v. Challengers
 
 ```{r}
-##### Count
-plot_coef <- window_plot(data_rep_num, FALSE,FALSE)
-
-# optimal
-bw_amount <- IKbandwidth(X = data_rep_num$days,
-                        Y = data_rep_num$number_donations, cutpoint = 0)
-bw_amount_dta <-subset(data_rep_num, days > 0 - bw_amount & days < 0 + bw_amount)
+# optimal bandwidth - Incumbents
+bw_amount_dta_inc_std <-subset(data_inc_amount_std, 
+                           days > 0 - bw_amount_inc & days < 0 + bw_amount_inc)
 # Full Data - Amount (optimal)
-lout_optimal <- lm(number_donations ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
+lout_optimal_inc_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_inc_std)
+summary(lout_optimal_inc_std)
 
-plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
+# optimal bandwidth - Challengers
+bw_amount_dta_chall_std <-subset(data_chall_amount_std, 
+                           days > 0 - bw_amount_chall & days < 0 + bw_amount_chall)
+# Full Data - Amount (optimal)
+lout_optimal_chall_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_chall_std)
+summary(lout_optimal_chall_std)
 
-# number of significant window sizes
-nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
-
-# Plot --------------------------------------------------------------------
-ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  scale_color_manual(values = c("black","red")) +
-  theme(legend.position = "none") +
-  scale_y_continuous(labels = scales::number_format(accuracy = 1L,
-                                                    big.mark = ",")) +
-  scale_x_continuous("Window Size (Days)",
-                     breaks = seq(0, 90, by = 15)) +
-  labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Political Protests on Conservative Donation Behavior") +
-  ylab("Increase in Federal Donations to Republicans") +
-  geom_label(
-    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 69 Days Coefficient: 5252, P-Value: 0.17",46), 
-    x=68,
-    y=17000,
-    label.padding = unit(0.1, "lines"), # Rectangle size around label
-    label.size = NA,
-    color = "black",
-    fill="#56B4E9",
-    size = 2.5
-  )
 ```
 
-23 out of 90 significant
-
-#### Incumbent v. Challenger
+#### African American Candidates
 
 ```{r}
 ##### Amount
-plot_coef <- window_plot(data_dem_amount_std, TRUE, TRUE)
+plot_coef <- window_plot(data_aa_amount, TRUE, FALSE)
 
-# optimal
-bw_amount <- IKbandwidth(X = data_dem_amount_std$days,
-                        Y = data_dem_amount_std$amount_donations_standardized, 
-                        cutpoint = 0)
-bw_amount_dta <-subset(data_dem_amount_std, days > 0 - bw_amount & days < 0 + bw_amount)
+# optimal bandwidth
+bw_amount_aa <- IKbandwidth(X = data_aa_amount$days,
+                        Y = data_aa_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_aa <-subset(data_aa_amount, 
+                           days > 0 - bw_amount_aa & days < 0 + bw_amount_aa)
 # Full Data - Amount (optimal)
-lout_optimal <- lm(amount_donations_standardized ~ days + I(days > 0), data = bw_amount_dta)
-summary(lout_optimal)
+lout_optimal_aa <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_aa)
+summary(lout_optimal_aa)
 
 plot_coef$optimal <- 0
-plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount), 1, 0)
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_aa), 1, 0)
 
 # number of significant window sizes
 nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+
+# Mean coefficient
+print(summary(plot_coef[,"coefficient"]))
+# mean pvalue
+print(summary(plot_coef[,"pvalue"]))
 
 # Plot --------------------------------------------------------------------
 ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
@@ -1763,13 +1619,151 @@ ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal)
              color = "red") +
   scale_color_manual(values = c("black","red")) +
   theme(legend.position = "none") +
-  #scale_y_continuous(labels = scales::dollar_format()) +
+  scale_y_continuous(labels = scales::dollar_format()) +
   scale_x_continuous("Window Size (Days)",
                      breaks = seq(0, 90, by = 15)) +
   labs(title = "Varying Window Sizes:",
-       subtitle = "The Effect of Protests on (Standardized) Liberal Donation Behavior") +
-  ylab("Increase in Donations to Democrats")
+       subtitle = "The Effect of Political Protests on Donations to African American Candidates") +
+  ylab("Increase in Federal Donations to African Americans") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 26 Days Coefficient: $342,166, P-Value: 0.001",46), 
+    x=26,
+    y=480000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
 
+70 of 85 windows significant. Mean coefficient is 349432 and median is 344336. Mean p-value is 0.034 and the median p-value is 0.003.
+
+#### White Candidates
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_white_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_white <- IKbandwidth(X = data_white_amount$days,
+                        Y = data_white_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_white <-subset(data_white_amount, 
+                       days > 0 - bw_amount_white & days < 0 + bw_amount_white)
+# Full Data - Amount (optimal)
+lout_optimal_white <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_white)
+summary(lout_optimal_white)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_white), 1, 0)
+
+# number of significant window sizes
+nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+
+# Mean coefficient
+print(summary(plot_coef[,"coefficient"]))
+# mean pvalue
+print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to White Candidates") +
+  ylab("Increase in Federal Donations to White Candidates") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 61 Days Coefficient: $3,336,866, P-Value: 0.007",46), 
+    x=33,
+    y=5000000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+55 of 85 windows significant. Mean coefficient is 3700635 and median is 3437550. Mean p-value is 0.076 and the median p-value is 0.033.
+
+#### African American Candidates v. White Candidates
+
+```{r}
+# optimal bandwidth - African Americans
+bw_amount_dta_aa_std <-subset(data_aa_amount_std, 
+                           days > 0 - bw_amount_aa & days < 0 + bw_amount_aa)
+# Full Data - Amount (optimal)
+lout_optimal_aa_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_aa_std)
+summary(lout_optimal_aa_std)
+
+# optimal bandwidth - White
+bw_amount_dta_white_std <-subset(data_white_amount_std, 
+                           days > 0 - bw_amount_white & days < 0 + bw_amount_white)
+# Full Data - Amount (optimal)
+lout_optimal_white_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_white_std)
+summary(lout_optimal_white_std)
+
+```
+
+#### Subgroup Plot
+
+```{r}
+
+dem_coefficients <- summary(lout_optimal_dem_std)[["coefficients"]][3, 1:2]
+rep_coefficients <- summary(lout_optimal_rep_std)[["coefficients"]][3, 1:2]
+inc_coefficients <- summary(lout_optimal_inc_std)[["coefficients"]][3, 1:2]
+chall_coefficients <- summary(lout_optimal_chall_std)[["coefficients"]][3, 1:2]
+aa_coefficients <- summary(lout_optimal_aa_std)[["coefficients"]][3, 1:2]
+white_coefficients <- summary(lout_optimal_white_std)[["coefficients"]][3, 1:2]
+
+subgroup_plot <- rbind(dem_coefficients, rep_coefficients, inc_coefficients,
+                      chall_coefficients, aa_coefficients, white_coefficients)
+
+subgroup_plot <- rownames_to_column(as.data.frame(subgroup_plot), "model")
+
+colnames(subgroup_plot) <- c("model", "estimate", "se")
+
+subgroup_plot <- subgroup_plot %>% 
+  mutate(model = dplyr::recode(model, "dem_coefficients" = "Democrats Only",
+                               "rep_coefficients" = "Republicans Only",
+                               "inc_coefficients" = "Incumbents Only",
+                               "chall_coefficients" = "Challengers Only",
+                               "aa_coefficients" = "African Americans Only",
+                               "white_coefficients" = "Whites Only"),
+         model = factor(model, levels = c("Democrats Only",
+                                          "Republicans Only",
+                                          "Incumbents Only",
+                                          "Challengers Only",
+                                          "African Americans Only",
+                                          "Whites Only")))
+
+```
+
+```{r}
+subgroup_plot %>% 
+  ggplot(aes(x = as.factor(model), y = estimate)) +
+  geom_point(size = 2) +
+  geom_errorbar(width=.2,
+                size=0.5,
+                aes(ymin = estimate - (2*se), ymax = estimate + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  theme(axis.text.x = element_text(angle = 30,vjust=0.6)) +
+  labs(title = "Effect of Political Protests on Donations to Subsets of Candidates",
+       caption = "Note: Each model is fit using the Imbens-Kalyanaraman Optimal Bandwidth.") +
+  ylab("Standardized Increase in Donations") +
+  xlab("Candidate Subgroup")
 ```
 
 
@@ -1798,14 +1792,14 @@ feature_transform <- function(protest_data, fec_data, daily){
   
   # 2) log log
   fec_log_log <- data %>% 
-    mutate(n = log(n+1),
+    mutate(n = log(number_protests+1),
            number_donations = log(number_donations+1),
            amount_donations = log(amount_donations+1))
   
   # 3) Lag DV and IV
   fec_lag <- data %>% 
     group_by(fips_code) %>% 
-    mutate(lag_week_protest = lag(n, order_by = fips_code),
+    mutate(lag_week_protest = lag(number_protests, order_by = fips_code),
            lag_week_donation_count = lag(number_donations, order_by = fips_code),
            lag_week_donation_amount = lag(amount_donations, order_by = fips_code)) %>% 
     ungroup() %>% 
@@ -1814,7 +1808,7 @@ feature_transform <- function(protest_data, fec_data, daily){
   # 4) Lag Log DV and IV
   fec_lag_log_DV <- fec_log_DV %>% 
     group_by(fips_code) %>% 
-    mutate(lag_week_protest = lag(n, order_by = fips_code),
+    mutate(lag_week_protest = lag(number_protests, order_by = fips_code),
            lag_week_donation_count = lag(number_donations, order_by = fips_code),
            lag_week_donation_amount = lag(amount_donations, order_by = fips_code)) %>% 
     ungroup() %>% 
@@ -1823,7 +1817,7 @@ feature_transform <- function(protest_data, fec_data, daily){
   # 5) Lag Log DV and log IV
   fec_lag_log_log <- fec_log_log %>% 
     group_by(fips_code) %>% 
-    mutate(lag_week_protest = lag(n, order_by = fips_code),
+    mutate(lag_week_protest = lag(number_protests, order_by = fips_code),
            lag_week_donation_count = lag(number_donations, order_by = fips_code),
            lag_week_donation_amount = lag(amount_donations, order_by = fips_code)) %>% 
     ungroup() %>% 
@@ -1845,16 +1839,16 @@ feature_transform <- function(protest_data, fec_data, daily){
 
 run_regression <- function(data, number, lag){
   if (lag == FALSE & number == TRUE){
-    model <- fixest::feols(number_donations ~ n | factor (fips_code) + factor(year) + factor(date), 
+    model <- fixest::feols(number_donations ~ number_protests | factor (fips_code) + factor(year) + factor(date), 
                          data = data)
   } else if (lag == FALSE & number == FALSE){
-    model <- fixest::feols(amount_donations ~ n | factor (fips_code) + factor(year) + factor(date), 
+    model <- fixest::feols(amount_donations ~ number_protests | factor (fips_code) + factor(year) + factor(date), 
                          data = data)
   } else if (lag == TRUE & number == TRUE) {
-    model <- fixest::feols(number_donations ~ n + lag_week_donation_count + lag_week_protest | factor(fips_code) + factor(year) + factor(date), 
+    model <- fixest::feols(number_donations ~ number_protests + lag_week_donation_count + lag_week_protest | factor(fips_code) + factor(year) + factor(date), 
                          data = data)
   } else if (lag == TRUE & number == FALSE) {
-    model <- fixest::feols(amount_donations ~ n + lag_week_donation_amount + lag_week_protest | factor(fips_code) + factor(year) + factor(date), 
+    model <- fixest::feols(amount_donations ~ number_protests + lag_week_donation_amount + lag_week_protest | factor(fips_code) + factor(year) + factor(date), 
                          data = data)
   }
   return(model)
@@ -1896,14 +1890,14 @@ analyze_data <- function(data_ls){
   model1_num <- run_regression(data_standard, TRUE, FALSE)
   model1_num_summary <- summary(model1_num)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Standard Model - Number of Donations"
+  model_type <- "Base Model - Number Donations"
   mat <- return_coefficients(mat, model1_num_summary, 1, 
                       model_type, 1, NULL, NULL, FALSE)
   # dv: amount of donations
   model1_amount <- run_regression(data_standard, FALSE, FALSE)
   model1_amount_summary <- summary(model1_amount)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Standard Model - Amount of Donations"
+  model_type <- "Base Model - Amount Donations"
   mat <- return_coefficients(mat, model1_amount_summary, 2, 
                       model_type, 2, NULL, NULL, FALSE)
   
@@ -1913,14 +1907,14 @@ analyze_data <- function(data_ls){
   model2_num <- run_regression(data_dvlog, TRUE, FALSE)
   model2_num_summary <- summary(model2_num)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Logged DV - Number of Donations"
+  model_type <- "Logged DV - Number Donations"
   mat <- return_coefficients(mat, model2_num_summary, 3, 
                       model_type, 3, NULL, NULL, FALSE)
   # dv: amount of donations
   model2_amount <- run_regression(data_dvlog, FALSE, FALSE)
   model2_amount_summary <- summary(model2_amount)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Logged DV - Amount of Donations"
+  model_type <- "Logged DV - Amount Donations"
   mat <- return_coefficients(mat, model2_amount_summary, 4, 
                       model_type, 4, NULL, NULL, FALSE)
   
@@ -1930,14 +1924,14 @@ analyze_data <- function(data_ls){
   model3_num <- run_regression(data_loglog, TRUE, FALSE)
   model3_num_summary <- summary(model3_num)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Log-log - Number of Donations"
+  model_type <- "Log-log - Number Donations"
   mat <- return_coefficients(mat, model3_num_summary, 5, 
                       model_type, 5, NULL, NULL, FALSE)
   # dv: amount of donations
   model3_amount <- run_regression(data_loglog, FALSE, FALSE)
   model3_amount_summary <- summary(model3_amount)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Log-log - Amount of Donations"
+  model_type <- "Log-log - Amount Donations"
   mat <- return_coefficients(mat, model3_amount_summary, 6, 
                       model_type, 6, NULL, NULL, FALSE)
   
@@ -1947,14 +1941,14 @@ analyze_data <- function(data_ls){
   model4_num <- run_regression(data_lag, TRUE, TRUE)
   model4_num_summary <- summary(model4_num)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Lag - Number of Donations"
+  model_type <- "Lag - Number Donations"
   mat <- return_coefficients(mat, model4_num_summary, 7:9, 
                       model_type, 7, 8, 9, TRUE)
   # dv: amount of donations
   model4_amount <- run_regression(data_lag, FALSE, TRUE)
   model4_amount_summary <- summary(model4_amount)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Lag - Amount of Donations"
+  model_type <- "Lag - Amount Donations"
   mat <- return_coefficients(mat, model4_amount_summary, 10:12, 
                       model_type, 10, 11, 12, TRUE)
   
@@ -1964,14 +1958,14 @@ analyze_data <- function(data_ls){
   model5_num <- run_regression(data_lag_logDV, TRUE, TRUE)
   model5_num_summary <- summary(model5_num)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Lag log-DV - Number of Donations"
+  model_type <- "Lag log-DV - Number Donations"
   mat <- return_coefficients(mat, model5_num_summary, 13:15, 
                       model_type, 13, 14, 15, TRUE)
   # dv: amount of donations
   model5_amount <- run_regression(data_lag_logDV, FALSE, TRUE)
   model5_amount_summary <- summary(model5_amount)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Lag log-DV - Amount of Donations"
+  model_type <- "Lag log-DV - Amount Donations"
   mat <- return_coefficients(mat, model5_amount_summary, 16:18, 
                       model_type, 16, 17, 18, TRUE)
   
@@ -1981,7 +1975,7 @@ analyze_data <- function(data_ls){
   model6_num <- run_regression(data_lag_loglog, TRUE, TRUE)
   model6_num_summary <- summary(model6_num)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Lag log-log - Number of Donations"
+  model_type <- "Lag log-log - Number Donations"
   mat <- return_coefficients(mat, model6_num_summary, 19:21, 
                       model_type, 19, 20, 21, TRUE)
   
@@ -1989,7 +1983,7 @@ analyze_data <- function(data_ls){
   model6_amount <- run_regression(data_lag_loglog, FALSE, TRUE)
   model6_amount_summary <- summary(model6_amount)[["coeftable"]]
   # extract coefficients from summary table
-  model_type <- "Lag log-log - Amount of Donations"
+  model_type <- "Lag log-log - Amount Donations"
   mat <- return_coefficients(mat, model6_amount_summary, 22:24, 
                       model_type, 22, 23, 24, TRUE)
 
@@ -2001,7 +1995,7 @@ analyze_data <- function(data_ls){
 
 ```
 
-
+### Analysis - all models
 ```{r}
 # full protest data
 data_all <- feature_transform(protest_weekly_all, fec_total_weekly_county, FALSE)
@@ -2046,51 +2040,146 @@ results_large_no2020 <- analyze_data(data_large_no2020)
 
 ```
 
-The results make sense until we do log transformations to the DV and IV. Why is that? How much of an issue is this? The results with transformations either are not significant... or they are even negative (although coefficients are very close to zero).
-
-Very interesting to see how the results change across different operationalizations for protests.
-
-Table to include (4 columns)
----results for model (no transformations) with no lags
----results for model (no transformations) with lags
-
-figure:
----plot the p-values (and direction for coefficient) across each of the different types of protests
-
-make reference to 2020 exclusion too
-
-NEXT: liberal--> democrat; conservative--> Republican
+### Diff-in-Diff Regression Tables
 
 ```{r}
-# function to plot coefficients
-plot_coeffients <- function(data,title,caption,ylab){
-  ggplot(data, aes(x = variable, y = Estimate)) +
-  geom_point(size = 2) +
-  geom_errorbar(width=.2,size=0.5,aes(ymin = Estimate - (2*Std..Error), ymax = Estimate + (2*Std..Error))) +
-  geom_hline(yintercept = 0,
-             linetype = "longdash",
-             color = "red") +
-  #scale_y_continuous(labels = percent_format()) +
-  theme(axis.text.x = element_text(angle = 30,vjust=0.7)) +
-  labs(title = title,
-       caption = caption) +
-  ylab(ylab) +
-  xlab("Model")
-}
+# Protests of more than 30 people
+
+##### 1) Analysis on full data
+data_standard <- data_large[[1]]
+# dv: amount of donations
+model1_amount <- run_regression(data_standard, FALSE, FALSE)
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_lag <- data_large[[4]]
+# dv: amount of donations
+model2_amount <- summary(run_regression(data_lag, FALSE, TRUE))
+
+### 3) Analysis on data with lagged DV and IV and log of DV
+data_lag_logDV <- data_large[[5]]
+# dv: amount of donations
+model3_amount <- run_regression(data_lag_logDV, FALSE, TRUE)
+
+# etable(model1_amount,
+#           model2_amount,
+#           model3_amount,
+#           tex = TRUE)
+
+```
+
+### Ideological Protests
+
+```{r}
+# Liberal Protests on Donations to Democrats
+data_dem <- feature_transform(protest_grouped_week_liberal,
+                              fec_total_weekly_county_D, FALSE)
+# Protests of more than 30 people
+
+##### 1) Analysis on full data
+data_dem_standard <- data_dem[[1]]
+# dv: amount of donations
+model1_dem_amount <- run_regression(data_dem_standard, FALSE, FALSE)
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_dem_lag <- data_dem[[4]]
+# dv: amount of donations
+model2_dem_amount <- summary(run_regression(data_dem_lag, FALSE, TRUE))
+
+### 3) Analysis on data with lagged DV and IV and log of DV
+data_lag_dem_logDV <- data_dem[[5]]
+# dv: amount of donations
+model3_dem_amount <- run_regression(data_lag_dem_logDV, FALSE, TRUE)
+
+# etable(model1_dem_amount,
+#           model2_dem_amount,
+#           model3_dem_amount,
+#           tex = TRUE)
+
+```
+
+
+```{r}
+# Liberal Protests on Donations to Republicans
+data_dem_rep <- feature_transform(protest_grouped_week_liberal,
+                              fec_total_weekly_county_R, FALSE)
+# Protests of more than 30 people
+
+##### 1) Analysis on full data
+data_dem_rep_standard <- data_dem_rep[[1]]
+# dv: amount of donations
+model1_dem_rep_amount <- run_regression(data_dem_rep_standard, FALSE, FALSE)
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_dem_rep_lag <- data_dem_rep[[4]]
+# dv: amount of donations
+model2_dem_rep_amount <- summary(run_regression(data_dem_rep_lag, FALSE, TRUE))
+
+### 3) Analysis on data with lagged DV and IV and log of DV
+data_lag_dem_rep_logDV <- data_dem_rep[[5]]
+# dv: amount of donations
+model3_dem_rep_amount <- run_regression(data_lag_dem_rep_logDV, FALSE, TRUE)
+
+# etable(model1_dem_rep_amount,
+#           model2_dem_rep_amount,
+#           model3_dem_rep_amount,
+#           tex = TRUE)
+
 ```
 
 ```{r}
-title <- "The Effect of Protests on Weekly County-Level FEC Donations (2017-2020)"
-caption <- str_wrap("Note: All models include county and week fixed effects as well as lagged number of donations.",54)
-ylab <- "Percent Increase in FEC Donations (US Dollars)"
-coefficients_logdviv_amount$Protest_Effect <- as.numeric(coefficients_logdviv_amount$Protest_Effect)
-coefficients_logdviv_amount$SE <- as.numeric(coefficients_logdviv_amount$SE)
-plot_coeffients(coefficients_logdviv_amount,title, caption,ylab)
+# Liberal Protests on Donations to Republicans
+data_rep <- feature_transform(protest_grouped_week_conservative,
+                              fec_total_weekly_county_R, FALSE)
+# Protests of more than 30 people
+
+##### 1) Analysis on full data
+data_rep_standard <- data_rep[[1]]
+# dv: amount of donations
+model1_rep_amount <- run_regression(data_rep_standard, FALSE, FALSE)
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_rep_lag <- data_rep[[4]]
+# dv: amount of donations
+model2_rep_amount <- summary(run_regression(data_rep_lag, FALSE, TRUE))
+
+### 3) Analysis on data with lagged DV and IV and log of DV
+data_lag_rep_logDV <- data_rep[[5]]
+# dv: amount of donations
+model3_rep_amount <- run_regression(data_lag_rep_logDV, FALSE, TRUE)
+
+# etable(model1_rep_amount,
+#           model2_rep_amount,
+#           model3_rep_amount,
+#           tex = TRUE)
+
 ```
 
 
+```{r}
+# Conservative Protests on Donations to Democrats
+data_rep_dem <- feature_transform(protest_grouped_week_conservative,
+                              fec_total_weekly_county_D, FALSE)
+# Protests of more than 30 people
 
+##### 1) Analysis on full data
+data_rep_dem_standard <- data_rep_dem[[1]]
+# dv: amount of donations
+model1_rep_dem_amount <- run_regression(data_rep_dem_standard, FALSE, FALSE)
 
-# Analysis III: Diff-in-Diff (day)
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_rep_dem_lag <- data_rep_dem[[4]]
+# dv: amount of donations
+model2_rep_dem_amount <- summary(run_regression(data_rep_dem_lag, FALSE, TRUE))
 
+### 3) Analysis on data with lagged DV and IV and log of DV
+data_lag_rep_dem_logDV <- data_rep_dem[[5]]
+# dv: amount of donations
+model3_rep_dem_amount <- run_regression(data_lag_rep_dem_logDV, FALSE, TRUE)
+
+# etable(model1_rep_dem_amount,
+#           model2_rep_dem_amount,
+#           model3_rep_dem_amount,
+#           tex = TRUE)
+
+```
 
