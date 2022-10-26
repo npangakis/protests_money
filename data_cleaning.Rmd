@@ -1,5 +1,5 @@
 ---
-title: "Social Protests Increase Donations to Federal Political Campaigns: Data Cleaning"
+title: "Protests Increase Donations to Federal Political Campaigns: Data Cleaning"
 author: "Nick Pangakis and Dan Gillion"
 output: 
   pdf_document:
@@ -26,7 +26,7 @@ editor_options:
 
 # Overview - Data Preparation
 
-How do protests influence American political behavior? This project investigates how political protests affect an individual's willingness to donate money to a federal political campaign. In this markdown, I describe the data cleaning procedures associated with this project. Please note that running this script takes roughly 2.5 hours to run in total.
+How do protests influence American political behavior? This project investigates how political protests affect an individual's willingness to donate money to a federal political campaign. In this markdown, I describe the data cleaning procedures associated with this project. 
 
 This study merges data from three sources:
 
@@ -98,7 +98,7 @@ protest_clean_all <- protest_raw %>%
   filter(year == 2017 | year == 2018 | year == 2019 | year == 2020 | year == 2021)
 
 # load to get full list of counties and zip codes
-zip_to_county_data <- read_excel(here("raw_data/ZIP_COUNTY_092021.xlsx")) %>% 
+zip_to_county_data <- read_excel("ZIP_COUNTY_092021.xlsx") %>% 
   select(1, 2) %>% 
   # limit to unique zip codes (bc several zip codes lie in multiple counties)
   distinct_at(vars(ZIP), .keep_all = T)
@@ -542,7 +542,7 @@ clean_candidate <- function(data, year){
 ```{r Candidate Data Cleaning}
 
 # Load to get full list of counties and zip codes
-zip_to_county_data <- read_excel(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/ZIP_COUNTY_092021.xlsx")) %>% 
+zip_to_county_data <- read_excel("ZIP_COUNTY_092021.xlsx") %>% 
   select(1, 2) %>% 
   # limit to unique zip codes (bc several zip codes lie in multiple counties)
   distinct_at(vars(ZIP), .keep_all = T)
@@ -550,15 +550,15 @@ zip_to_county_data <- read_excel(here("/Users/nickpangakis/Library/CloudStorage/
 # Manually Download Candidates Data from FEC website and read in .txt file (https://www.fec.gov/data/browse-data/?tab=bulk-data)
 # Candidate Master
 # 2017-2018: https://www.fec.gov/files/bulk-downloads/2018/cn18.zip
-candidate_2018 <- fread(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/candidate_2018.txt"), 
+candidate_2018 <- fread("candidate_2018.txt", 
                         sep = "|", header = FALSE, stringsAsFactors = FALSE)
 candidate_2018 <- clean_candidate(candidate_2018, "2017|2018")
 # 2019-2020: https://www.fec.gov/files/bulk-downloads/2020/cn20.zip
-candidate_2020 <- fread(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/candidate_2020.txt"), 
+candidate_2020 <- fread("candidate_2020.txt", 
                         sep = "|", header = FALSE, stringsAsFactors = FALSE)
 candidate_2020 <- clean_candidate(candidate_2020, "2019|2020")
 # 2021-2022: https://www.fec.gov/files/bulk-downloads/2022/cn22.zip
-candidate_2022 <- fread(here("/Users/nickpangakis/Library/CloudStorage/Box-Box/Project: Protests and Donations/code_and_data/raw_data/candidate_2022.txt"), 
+candidate_2022 <- fread("candidate_2022.txt", 
                         sep = "|", header = FALSE, stringsAsFactors = FALSE)
 candidate_2022 <- clean_candidate(candidate_2022, "2021|2022")
 # Combine the fec candidate data
@@ -570,7 +570,7 @@ nrow(candidate_fec[candidate_fec$CMTE_ID == "",])/nrow(candidate_fec)
 
 # Load in 2020 OpenSecrets Candidate Data, which includes information on candidate race and gender)
 # Please reach out to authors for access to this dataset
-os_candidate_raw <- read_csv(here("/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/candidaterace.csv"))
+os_candidate_raw <- read_csv("candidaterace.csv")
 
 # Data Wrangling - OpenSecrets candidate data (2020 only)
 os_candidate_subset <- os_candidate_raw %>% 
@@ -686,23 +686,23 @@ fec_cleaned <- function(file) {
 start.time <- Sys.time()
 
 # Read in FEC contribution header
-header <- fread(here("/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/indiv_header_file.csv"))
+header <- fread("indiv_header_file.csv")
 
 # Write function to preprocess the data
 fec_process <- function(){
   # 2017-2018 FEC individual contributions
   # Source: https://www.fec.gov/files/bulk-downloads/2018/indiv18.zip
-  file <- "/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/fec_2018.txt"
+  file <- "fec_2018.txt"
   fec_cleaned_2017_2018 <- fec_cleaned(file)
   
   # 2019-2020 FEC individual contributions
   # Source: https://www.fec.gov/files/bulk-downloads/2020/indiv20.zip
-  file <- "/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/fec_2020.txt"
+  file <- "fec_2020.txt"
   fec_cleaned_2019_2020 <- fec_cleaned(file)
   
   # 2021-2022 FEC individual contributions
   # Source: https://www.fec.gov/files/bulk-downloads/2022/indiv22.zip
-  file <- "/Users/nickpangakis/Desktop/AA - Penn 05 Spring 2022/data/fec_2022.txt"
+  file <- "fec_2022.txt"
   fec_cleaned_2021_2022 <- fec_cleaned(file)
   
   # Bind FEC donation data by row
@@ -839,7 +839,7 @@ fec_total_county_party <- function(data, party_id, time_group_var, time_group_st
 
 ```{r Read in FEC Data}
 # If previously downloaded FEC data, read into R
-fec_cleaned <- fread(here("processed_data/fec_cleaned.csv"))
+fec_cleaned <- fread("fec_cleaned.csv")
 ```
 
 

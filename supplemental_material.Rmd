@@ -1,0 +1,2148 @@
+---
+title: "Supplemental Material for 'Protests Increase Donations to Federal Political Campaigns'"
+author: "Nick Pangakis and Daniel Gillion"
+output: 
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    code_folding: show
+    highlight: haddock
+    number_sections: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  word_document:
+    toc: yes
+    toc_depth: '4'
+urlcolor: blue
+editor_options: 
+  chunk_output_type: inline
+header-includes:
+  - \usepackage{float}
+  - \usepackage{booktabs}
+---
+
+```{r setup, echo = FALSE,warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width=8, fig.height=4, include=TRUE, eval=TRUE, warning = FALSE, message = FALSE, fig.pos = 'p', fig.align='center')
+options(scipen = 0, digits = 3)  # controls base R output
+if(!require('pacman')) {
+  install.packages('pacman')
+}
+pacman::p_load(tidyverse, RCurl, here,
+               data.table, bit64, stringr,
+               readxl, tidyr, usmap, zoo,
+               lubridate, scales, fixest,
+               gridExtra, rdd, stargazer)
+
+# Load in protest data
+protest_data_full <- fread("protest_data.csv")
+
+# add in state and census region identifier
+# Source: https://github.com/kjhealy/fips-codes
+state_county_walkover <- fread("county_fips_master.csv") %>% 
+  select(fips, state_abbr, division_name)
+
+# load all FEC data
+fec_2020_daily_full <- fread("fec_2020_daily_full.csv")
+fec_weekly_daily<- fread("fec_weekly_daily.csv")
+```
+
+# S1: EDA on FEC Data
+
+## Geographic Plots of FEC Donations
+
+```{r}
+fec_weekly_daily %>%
+  filter(week_id == 0, is.na(R), is.na(D), !is.na(number_donations)) %>% 
+  left_join(state_county_walkover, by = c("COUNTY"="fips")) %>%
+  select(number_donations, state_abbr, COUNTY, division_name) %>% 
+  group_by(state_abbr, COUNTY ,division_name) %>% 
+  summarise(number_donations = sum(number_donations)) %>% 
+  drop_na() %>% 
+  ggplot(aes(x = forcats::fct_reorder(as.factor(state_abbr), 
+                                      number_donations,
+                                      .fun = mean,.desc = TRUE), 
+             y = number_donations, 
+             group=state_abbr,
+             fill = division_name)) +
+  geom_boxplot() +
+  labs(title = "Weekly Donation Variation Within and Between States (2017-2021)", x = "State (Grouped By Census Region)" , y = "Number of Weekly Donations by County") +
+  theme(legend.position = "None",
+        axis.text.x = element_text(
+          angle = 90,
+          vjust = 0.5,
+          hjust = 1)) 
+```
+
+Data might require log transformation, due to significant outliers.
+
+```{r}
+# Campaign contributions across states
+# LOGGED
+fec_weekly_daily %>%
+  filter(week_id == 0, is.na(R), is.na(D), !is.na(number_donations)) %>% 
+  left_join(state_county_walkover, by = c("COUNTY"="fips")) %>%
+  select(number_donations, state_abbr, COUNTY, division_name) %>% 
+  group_by(state_abbr, COUNTY ,division_name) %>% 
+  summarise(number_donations = sum(number_donations)) %>% 
+  drop_na() %>% 
+  ggplot(aes(x = forcats::fct_reorder(as.factor(state_abbr), 
+                                      log(number_donations+1),
+                                      .fun = mean,.desc = TRUE), 
+             y = log(number_donations+1), 
+             group=state_abbr,
+             fill = division_name)) +
+  geom_boxplot() +
+  labs(title = "Weekly Logged Donation Variation Within and Between States (2017-2021)", x = "State (Grouped By Census Region)" , y = "Number of Logged Weekly Donations by County") +
+  theme(legend.position = "None",
+        axis.text.x = element_text(
+          angle = 90,
+          vjust = 0.5,
+          hjust = 1)) 
+```
+
+# S2: RDD Regression Tables and Robustness Checks
+
+```{r}
+# Subset daily donation data
+number_daily_donations_full <- fec_2020_daily_full %>% 
+  filter(is.na(amount_donations), is.na(republican), is.na(democrat), 
+         is.na(incumbent), is.na(white), is.na(number_donations_standardized), 
+         is.na(amount_donations_standardized), is.na(challenger), is.na(africanamerican)) %>% 
+  arrange(days) %>% 
+  select(days, after, number_donations) %>% 
+  # Restrict data to 90 days before and 90 days after the killing
+  filter(days > -91 & days < 91)
+
+amount_daily_donations_full <- fec_2020_daily_full %>% 
+  filter(is.na(number_donations), is.na(republican), is.na(democrat), 
+         is.na(incumbent), is.na(white), is.na(number_donations_standardized), 
+         is.na(amount_donations_standardized), is.na(challenger), is.na(africanamerican)) %>% 
+  arrange(days) %>% 
+  select(days, after, amount_donations) %>% 
+  # Restrict data to 90 days before and 90 days after the killing
+  filter(days > -91 & days < 91)
+```
+
+```{r}
+##### Normal model
+
+# Calculate optimal bandwidth
+bw_amount <- IKbandwidth(X = amount_daily_donations_full$days, 
+                        Y = amount_daily_donations_full$amount_donations, cutpoint = 0)
+bw_amount_dta <-subset(amount_daily_donations_full, days > 0 - bw_amount & days < 0 + bw_amount)
+# Full Data - Amount (optimal)
+lout_optimal_all <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
+```
+
+```{r}
+library(MASS)
+### Poisson - amount per day
+lout_poisson <-
+  glm(amount_donations ~ days + I(days > 0), family = "poisson", data = bw_amount_dta)
+
+### negative binomial - amount per day
+lout_nb <- glm.nb(amount_donations ~ days + I(days > 0), data = bw_amount_dta)
+detach("package:MASS", unload=TRUE)
+
+```
+
+```{r}
+##### Adding polynomials
+
+# Calculate optimal bandwidth
+bw_amount <- IKbandwidth(X = amount_daily_donations_full$days, 
+                        Y = amount_daily_donations_full$amount_donations, cutpoint = 0)
+bw_amount_dta <-subset(amount_daily_donations_full, days > 0 - bw_amount & days < 0 + bw_amount)
+# Full Data - Number (optimal)
+lout_optimal_poly <- lm(amount_donations ~ days^2 + I(days > 0), data = bw_amount_dta)
+
+```
+
+```{r}
+# stargazer(lout_optimal_all, 
+#           lout_poisson,
+#           lout_nb,
+#           lout_optimal_poly,
+#           style = "apsr")
+```
+
+\begin{table}[H] \centering 
+  \caption{The Effect of Political Protests on Donation Behavior} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lcccc} 
+\\[-1.8ex]\hline \\[-1.8ex] 
+\\ \multicolumn{5}{c}{Dependent Variable: Daily Amount of FEC Campaign Contributions in US Dollars} \\ 
+\\[-1.8ex] & OLS & Poisson & Negative & OLS (With Polynomial) \\ 
+ &  &  & Binomial &  \\ 
+\\[-1.8ex] & (1) & (2) & (3) & (4)\\ 
+\hline \\[-1.8ex] 
+ Impact of Political Protests  & 8,052,911.000$^{**}$ & 0.492$^{***}$ & 0.502$^{***}$ & 8,052,911.000$^{**}$ \\ 
+  & (3,361,055.000) & (0.0001) & (0.146) & (3,361,055.000) \\ 
+ Forcing Variable (Time) & 42,223.000 & 0.002$^{***}$ & 0.002 & 42,223.000 \\ 
+  & (45,839.000) & (0.00000) & (0.002) & (45,839.000) \\ 
+
+   &  &  &  &  \\ 
+   &  &  &  &  \\ 
+  Constant & 13,063,630.000$^{***}$ & 16.400$^{***}$ & 16.400$^{***}$ & 13,063,630.000$^{***}$ \\ 
+  & (1,867,049.000) & (0.0001) & (0.081) & (1,867,049.000) \\ 
+ N & 127 & 127 & 127 & 127 \\ 
+R$^{2}$ & 0.251 &  &  & 0.251 \\ 
+Adjusted R$^{2}$ & 0.239 &  &  & 0.239 \\ 
+Log Likelihood &  & $-$210,873,793.000 & $-$2,169.000 &  \\ 
+$\theta$ &  &  & 5.880$^{***}$  (0.718) &  \\ 
+Residual Std. Error (df = 124) & 9,468,999.000 &  &  & 9,468,999.000 \\ 
+F Statistic (df = 2; 124) & 20.800$^{***}$ &  &  & 20.800$^{***}$ \\ 
+AIC &  & 421,747,593.000 & 4,345.000 &  \\ 
+\hline \\[-1.8ex] 
+\multicolumn{5}{l}{$^{*}$p $<$ .1; $^{**}$p $<$ .05; $^{***}$p $<$ .01} \\ 
+\end{tabular} 
+\end{table}
+
+# S3: RDD - Number of Donations as DV
+
+```{r}
+# Subset daily donation data
+number_daily_donations <- fec_2020_daily_full %>% 
+  filter(is.na(amount_donations), is.na(republican), is.na(democrat), 
+         is.na(incumbent), is.na(white), is.na(number_donations_standardized), 
+         is.na(amount_donations_standardized), is.na(challenger), is.na(africanamerican)) %>% 
+  arrange(days) %>% 
+  select(days, after, number_donations)
+```
+
+## S3A: Window Plot - Number of Donations
+```{r}
+##### Visualize regression coefficients over varying windows
+windows <- seq(5,90, by=1)
+mat <- matrix(NA, nrow = 86, ncol = 4)
+for (i in 1:length(windows)){
+  # create varying subset to run regression
+  sub_dta <- subset(number_daily_donations_full,
+                    days > 0 - windows[i] & days < 0 + windows[i])
+  # fit linear model
+  lout_sub <- summary(lm(number_donations ~ days + I(days > 0), 
+                         data=sub_dta))
+  # extract necessary coefficients
+  coefficient <- round(lout_sub$coefficients[[3]], 3)
+  se <- round(lout_sub$coefficients[[3,2]], 3)
+  pvalue <- round(lout_sub$coefficients[[3,4]], 3)
+  # add coefficients to plot
+  mat[i,1] <- windows[i]
+  mat[i,2] <- coefficient
+  mat[i,3] <- se
+  mat[i,4] <- pvalue
+}
+colnames(mat) <- c("window_size","coefficient","se","pvalue")
+plot_coef <- data.frame(mat)
+plot_coef <- plot_coef %>% 
+  mutate(significant = case_when(pvalue < 0.051 ~ 1, TRUE ~ 0)) %>% 
+  drop_na()
+
+# Calculate optimal bandwidth
+bw_count <- IKbandwidth(X = number_daily_donations_full$days, 
+                        Y = number_daily_donations_full$number_donations, cutpoint = 0)
+bw_count_dta <-subset(number_daily_donations_full, days > 0 - bw_count & days < 0 + bw_count)
+# Full Data - Number (optimal)
+lout_optimal <- lm(number_donations ~ days + I(days > 0), data = bw_count_dta)
+#summary(lout_optimal)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_count), 1, 0)
+
+# # number of significant window sizes
+# nrow(mat[mat[,"pvalue"] < 0.051,])
+# # Mean coefficient
+# print(summary(mat[,"coefficient"]))
+# # mean pvalue
+# print(summary(mat[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient,color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::number_format(accuracy = 1L,big.mark = ",")) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       #caption = "Figure 3",
+       subtitle = "The Effect of Political Protests on Donation Behavior") +
+  ylab("Increase in Number of Federal Donations") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 68 Days Coefficient: 23,394, P-Value: 0.27",46), 
+    x=68,
+    y=83000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+All positive. 30 out of 86 bandwidths show statistically significant increases. Mean coefficient is 43378 and median is 35897. Mean p-value is 0.124 and the median p-value is 0.086.
+
+## S3B: Threshold Plot - Number of Donations
+
+```{r}
+threshold <- seq(-70,70, by=1)
+threshold_ls <- vector()
+coef_ls <- vector()
+pvalue_ls <- vector()
+se_ls <- vector()
+for (i in 1:length(threshold)) {
+  data <- number_daily_donations %>% 
+    filter(days > threshold[i] - 91 & days < threshold[i] + 91)
+  bw_count <- IKbandwidth(X = data$days,
+                          Y = data$number_donations,
+                          cutpoint = threshold[i])
+  sub_dta <-
+    subset(data, days > threshold[i] - bw_count & days < threshold[i] + bw_count)
+  lout_sub <-
+    summary(lm(number_donations ~ days + I(days > threshold[i]), data = sub_dta))
+  coefficient <- round(lout_sub$coefficients[[3]], 3)
+  se <- round(lout_sub$coefficients[[3, 2]], 3)
+  pvalue <- round(lout_sub$coefficients[[3, 4]], 3)
+  threshold_ls <- append(threshold_ls, threshold[i])
+  coef_ls <- append(coef_ls, coefficient)
+  pvalue_ls <- append(pvalue_ls, pvalue)
+  se_ls <- append(se_ls, se)
+}
+
+mat <- matrix(NA, nrow = 141, ncol = 4)
+
+for (i in 1:length(pvalue_ls)){
+  mat[i, 1] <- threshold_ls[i]
+  mat[i, 2] <- coef_ls[i]
+  mat[i, 3] <- pvalue_ls[i]
+  mat[i, 4] <- se_ls[i]
+}
+
+colnames(mat) <- c("threshold", "coefficient","pvalue","se")
+plot_coef <- data.frame(mat)
+
+plot_coef$significant <- 0
+
+for (i in 1:nrow(plot_coef)) {
+  if (plot_coef$coefficient[i] > 0) {
+    plot_coef$significant[i] <-
+      ifelse((plot_coef$coefficient[i] - (2 * plot_coef$se[i])) > 0, 1, plot_coef$significant[i])
+  } else if (plot_coef$coefficient[i] < 0) {
+    plot_coef$significant[i] <-
+      ifelse((plot_coef$coefficient[i] + (2 * plot_coef$se[i])) < 0, 1, plot_coef$significant[i])
+  }
+}
+
+# number of significant coefficients
+#sum(plot_coef$significant)
+# number of positive significant coefficients
+#nrow(plot_coef[plot_coef[,"significant"] == 1 & plot_coef[,"coefficient"] > 0, ]) 
+
+# change x axis
+xaxis <- seq.Date(as.IDate("2020-03-16"), as.IDate("2020-08-03"), by="days")
+
+# Plot
+ggplot(plot_coef, aes(x = xaxis, y = coefficient,color=as.factor(significant))) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("black","red")) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  theme(legend.position = "none") +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_y_continuous(labels = scales::number_format(accuracy = 1L,big.mark = ",")) +
+  geom_vline(xintercept = xaxis[71],
+             linetype = "dotdash",
+             color = "red") +
+  scale_x_date("Threshold", date_breaks = "1 month", date_labels =  "%b %Y") +
+  labs(title = "Varying Thresholds:",
+       caption = "Note: For every threshold, each model is fit using the Imbens-Kalyanaraman Optimal Bandwidth.",
+       subtitle = "The Effect of Political Protests on Donation Behavior") +
+  ylab("Increase in Number of Federal Donations") +
+  geom_label(
+    label=str_wrap("May 25th, 2020, Police Killing of George Floyd",20), 
+    x=xaxis[71],
+    y=-80000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+# S4: Subgroup Analysis
+
+```{r}
+rm(data)
+# function to analyze window plots
+window_plot <- function(data, amount, std){
+  ##### Visualize regression coefficients over varying windows
+  windows <- seq(5,90, by=1)
+  mat <- matrix(NA, nrow = 86, ncol = 4)
+  for (i in 1:length(windows)){
+    # create varying subset to run regression
+    sub_dta <- subset(data,
+                      days > 0 - windows[i] & days < 0 + windows[i])
+    # fit linear model
+    if (amount == TRUE & std == FALSE){
+      lout_sub <- summary(lm(amount_donations ~ days + I(days > 0), 
+                           data=sub_dta))
+    } else if (amount == TRUE & std == TRUE){
+      lout_sub <- summary(lm(amount_donations_standardized ~ 
+                               days + I(days > 0), 
+                             data=sub_dta))
+    } else if (amount == FALSE & std == FALSE){
+      lout_sub <- summary(lm(number_donations ~ 
+                               days + I(days > 0), 
+                             data=sub_dta))
+    } else if (amount == FALSE & std == TRUE){
+      lout_sub <- summary(lm(number_donations_standardized ~ 
+                               days + I(days > 0), 
+                             data=sub_dta))
+    }
+    # extract necessary coefficients
+    coefficient <- round(lout_sub$coefficients[[3]], 3)
+    se <- round(lout_sub$coefficients[[3,2]], 3)
+    pvalue <- round(lout_sub$coefficients[[3,4]], 3)
+    # add coefficients to plot
+    mat[i,1] <- windows[i]
+    mat[i,2] <- coefficient
+    mat[i,3] <- se
+    mat[i,4] <- pvalue
+  }
+  colnames(mat) <- c("window_size","coefficient","se","pvalue")
+  plot_coef <- data.frame(mat)
+  plot_coef <- plot_coef %>% 
+    mutate(significant = case_when(pvalue < 0.051 ~ 1, TRUE ~ 0)) %>% 
+    drop_na()
+
+  return(plot_coef)
+}
+```
+
+```{r}
+##### Preprocess data
+
+# Democrats - amount
+data_dem_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & !is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations, democrat) %>% 
+  filter(democrat == 1,
+         days > -91 & days < 91) 
+
+# Democrats - amount standardized
+data_dem_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & !is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations_standardized, democrat) %>% 
+  filter(democrat == 1,
+         days > -91 & days < 91) 
+
+# Republican - amount
+data_rep_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations, republican) %>% 
+  filter(republican == 1,
+         days > -91 & days < 91) 
+
+# Republican - amount standardized
+data_rep_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & !is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations_standardized, republican) %>% 
+  filter(republican == 1,
+         days > -91 & days < 91) 
+
+# Incumbent - amount
+data_inc_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           !is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations, incumbent) %>% 
+  filter(incumbent == 1,
+         days > -91 & days < 91) 
+
+# Incumbent - amount standardized
+data_inc_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           !is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations_standardized, incumbent) %>% 
+  filter(incumbent == 1,
+         days > -91 & days < 91) 
+
+# Challenger - amount
+data_chall_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & !is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations, challenger) %>% 
+  filter(challenger == 1,
+         days > -91 & days < 91) 
+
+# Challenger - amount standardized
+data_chall_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & !is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations_standardized, challenger) %>% 
+  filter(challenger == 1,
+         days > -91 & days < 91) 
+
+# African American - amount
+data_aa_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & !is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations, africanamerican) %>% 
+  filter(africanamerican == 1,
+         days > -91 & days < 91) 
+
+# African American - amount standardized
+data_aa_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & !is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & is.na(white) ) %>% 
+  select(days, amount_donations_standardized, africanamerican) %>% 
+  filter(africanamerican == 1,
+         days > -91 & days < 91) 
+
+# White - amount
+data_white_amount <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & !is.na(white) ) %>% 
+  select(days, amount_donations, white) %>% 
+  filter(white == 1,
+         days > -91 & days < 91) 
+
+# White - amount standardized
+data_white_amount_std <- fec_2020_daily_full %>% 
+  filter(!is.na(amount_donations_standardized) & !is.na(amount_donations) & is.na(number_donations) & is.na(democrat) & is.na(republican) & is.na(africanamerican) &
+           is.na(incumbent) & is.na(challenger) & !is.na(white) ) %>% 
+  select(days, amount_donations_standardized, white) %>% 
+  filter(white == 1,
+         days > -91 & days < 91) 
+
+```
+
+## S4A: Democratic Candidates Only
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_dem_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_dem <- IKbandwidth(X = data_dem_amount$days,
+                        Y = data_dem_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_dem <- subset(data_dem_amount, days > 0 - bw_amount_dem & days < 0 + bw_amount_dem)
+# Full Data - Amount (optimal)
+lout_optimal_dem <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_dem)
+#summary(lout_optimal_dem)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_dem), 1, 0)
+
+# # number of significant window sizes
+# nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+# 
+# # Mean coefficient
+# print(summary(plot_coef[,"coefficient"]))
+# # mean pvalue
+# print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to Democrats") +
+  ylab("Increase in Federal Donations to Democrats") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 31 Days Coefficient: $2,617,291, P-Value: 0.004",46), 
+    x=31,
+    y=5500000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+69 of 85 windows significant. Mean coefficient is 2827582 and median is 2717317. Mean p-value is 0.042 and the median p-value is 0.016.
+
+## S4B: Republican Candidates Only
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_rep_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_rep <- IKbandwidth(X = data_rep_amount$days,
+                        Y = data_rep_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_rep <-subset(data_rep_amount, days > 0 - bw_amount_rep & days < 0 + bw_amount_rep)
+# Full Data - Amount (optimal)
+lout_optimal_rep <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_rep)
+#summary(lout_optimal_rep)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_rep), 1, 0)
+
+# # number of significant window sizes
+# nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+# 
+# # Mean coefficient
+# print(summary(plot_coef[,"coefficient"]))
+# # mean pvalue
+# print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to Republicans") +
+  ylab("Increase in Federal Donations to Republicans") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 32 Days Coefficient: $1,052,460, P-Value: 0.14",46), 
+    x=32,
+    y=3700000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+37 of 85 windows significant. Mean coefficient is 1732282 and median is 1836606. Mean p-value is 0.158 and the median p-value is 0.060.
+
+## S4C: Democrats v. Republicans
+
+```{r}
+# optimal bandwidth - Democrats
+bw_amount_dta_dem_std <-subset(data_dem_amount_std, 
+                           days > 0 - bw_amount_dem & days < 0 + bw_amount_dem)
+lout_optimal_dem_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_dem_std)
+#summary(lout_optimal_dem_std)
+
+# optimal bandwidth - Republicans
+bw_amount_dta_rep_std <-subset(data_rep_amount_std, 
+                           days > 0 - bw_amount_rep & days < 0 + bw_amount_rep)
+lout_optimal_rep_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_rep_std)
+#summary(lout_optimal_rep_std)
+
+```
+
+```{r}
+# stargazer(lout_optimal_dem,
+#           lout_optimal_rep,
+#           style = "apsr")
+```
+
+\begin{table}[H] \centering 
+  \caption{The Effect of Political Protests on Donations} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lcc} 
+\\[-1.8ex]\hline \\[-1.8ex] 
+\\ \multicolumn{3}{c}{Dependent Variable: Daily Amount of FEC Campaign Contributions in US Dollars} \\ 
+\\[-1.8ex] & Democrats & Republicans\\ 
+\hline \\[-1.8ex] 
+  Impact of Political Protests & 2,617,291.000$^{***}$ & 1,052,460.000 \\ 
+  & (875,168.000) & (695,013.000) \\ 
+ Forcing Variable (Time) & 6,038.000 & 30,846.000 \\ 
+  & (24,061.000) & (18,520.000) \\ 
+&  &  \\ 
+&  &  \\ 
+  Constant & 4,627,266.000$^{***}$ & 2,913,135.000$^{***}$ \\ 
+  & (483,019.000) & (383,740.000) \\ 
+ N & 63 & 65 \\ 
+R$^{2}$ & 0.407 & 0.378 \\ 
+Adjusted R$^{2}$ & 0.388 & 0.358 \\ 
+Residual Std. Error & 1,736,389.000 (df = 60) & 1,400,677.000 (df = 62) \\ 
+F Statistic & 20.600$^{***}$ (df = 2; 60) & 18.900$^{***}$ (df = 2; 62) \\ 
+\hline \\[-1.8ex] 
+\multicolumn{3}{l}{$^{*}$p $<$ .1; $^{**}$p $<$ .05; $^{***}$p $<$ .01} \\ 
+\end{tabular} 
+\end{table} 
+
+
+## S4D: Incumbent Candidates
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_inc_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_inc <- IKbandwidth(X = data_inc_amount$days,
+                        Y = data_inc_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_inc <-subset(data_inc_amount, 
+                           days > 0 - bw_amount_inc & days < 0 + bw_amount_inc)
+# Full Data - Amount (optimal)
+lout_optimal_inc <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_inc)
+#summary(lout_optimal_inc)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_inc), 1, 0)
+
+# # number of significant window sizes
+# nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+# 
+# # Mean coefficient
+# print(summary(plot_coef[,"coefficient"]))
+# # mean pvalue
+# print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to Incumbents") +
+  ylab("Increase in Federal Donations to Incumbents") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 29 Days Coefficient: $2,769,262, P-Value: 0.002",46), 
+    x=29,
+    y=4300000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+65 of 85 windows significant. Mean coefficient is 2602157 and median is 2591552. Mean p-value is 0.084 and the median p-value is 0.024.
+
+## S4E: Challenger Candidates
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_chall_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_chall <- IKbandwidth(X = data_chall_amount$days,
+                        Y = data_chall_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_chall <-subset(data_chall_amount, 
+                       days > 0 - bw_amount_chall & days < 0 + bw_amount_chall)
+# Full Data - Amount (optimal)
+lout_optimal_chall <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_chall)
+#summary(lout_optimal_chall)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_chall), 1, 0)
+
+# # number of significant window sizes
+# nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+# 
+# # Mean coefficient
+# print(summary(plot_coef[,"coefficient"]))
+# # mean pvalue
+# print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to Challengers") +
+  ylab("Increase in Federal Donations to Challengers") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 61 Days Coefficient: $1,640,828, P-Value: 0.043",46), 
+    x=61,
+    y=2500000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+36 of 85 windows significant. Mean coefficient is 1524017 and median is 1413897. Mean p-value is 0.102 and the median p-value is 0.074.
+
+## S4F: Incumbents v. Challengers
+
+```{r}
+# optimal bandwidth - Incumbents
+bw_amount_dta_inc_std <-subset(data_inc_amount_std, 
+                           days > 0 - bw_amount_inc & days < 0 + bw_amount_inc)
+# Full Data - Amount (optimal)
+lout_optimal_inc_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_inc_std)
+#summary(lout_optimal_inc_std)
+
+# optimal bandwidth - Challengers
+bw_amount_dta_chall_std <-subset(data_chall_amount_std, 
+                           days > 0 - bw_amount_chall & days < 0 + bw_amount_chall)
+# Full Data - Amount (optimal)
+lout_optimal_chall_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_chall_std)
+#summary(lout_optimal_chall_std)
+
+```
+
+```{r}
+# stargazer(lout_optimal_inc,
+#           lout_optimal_chall,
+#           style = "apsr")
+```
+
+\begin{table}[H] \centering 
+  \caption{The Effect of Political Protests on Donations} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lcc} 
+\\[-1.8ex]\hline \\[-1.8ex] 
+\\ \multicolumn{3}{c}{Dependent Variable: Daily Amount of FEC Campaign Contributions in US Dollars} \\ 
+\\[-1.8ex] & Incumbents & Challengers\\ 
+\hline \\[-1.8ex] 
+  Impact of Political Protests & 2,769,261.000$^{***}$ & 1,640,828.000$^{**}$ \\ 
+  & (868,769.000) & (801,342.000) \\ 
+ Forcing Variable (Time) & $-$12,301.000 & 2,988.000 \\ 
+  & (26,399.000) & (11,284.000) \\ 
+
+  &  &  \\ 
+&  &  \\ 
+  Constant & 3,690,640.000$^{***}$ & 2,825,463.000$^{***}$ \\ 
+  & (478,837.000) & (445,050.000) \\ 
+ N & 57 & 123 \\ 
+R$^{2}$ & 0.366 & 0.148 \\ 
+Adjusted R$^{2}$ & 0.343 & 0.134 \\ 
+Residual Std. Error & 1,639,513.000 (df = 54) & 2,221,756.000 (df = 120) \\ 
+F Statistic & 15.600$^{***}$ (df = 2; 54) & 10.400$^{***}$ (df = 2; 120) \\ 
+\hline \\[-1.8ex] 
+\multicolumn{3}{l}{$^{*}$p $<$ .1; $^{**}$p $<$ .05; $^{***}$p $<$ .01} \\ 
+\end{tabular} 
+\end{table} 
+
+
+## S4G: African American Candidates
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_aa_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_aa <- IKbandwidth(X = data_aa_amount$days,
+                        Y = data_aa_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_aa <-subset(data_aa_amount, 
+                           days > 0 - bw_amount_aa & days < 0 + bw_amount_aa)
+# Full Data - Amount (optimal)
+lout_optimal_aa <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_aa)
+#summary(lout_optimal_aa)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_aa), 1, 0)
+
+# # number of significant window sizes
+# nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+# 
+# # Mean coefficient
+# print(summary(plot_coef[,"coefficient"]))
+# # mean pvalue
+# print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to African American Candidates") +
+  ylab("Increase in Federal Donations to African Americans") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 26 Days Coefficient: $342,166, P-Value: 0.001",46), 
+    x=26,
+    y=480000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+70 of 85 windows significant. Mean coefficient is 349432 and median is 344336. Mean p-value is 0.034 and the median p-value is 0.003.
+
+## S4H: White Candidates
+
+```{r}
+##### Amount
+plot_coef <- window_plot(data_white_amount, TRUE, FALSE)
+
+# optimal bandwidth
+bw_amount_white <- IKbandwidth(X = data_white_amount$days,
+                        Y = data_white_amount$amount_donations, cutpoint = 0)
+bw_amount_dta_white <-subset(data_white_amount, 
+                       days > 0 - bw_amount_white & days < 0 + bw_amount_white)
+# Full Data - Amount (optimal)
+lout_optimal_white <- lm(amount_donations ~ days + I(days > 0), data = bw_amount_dta_white)
+#summary(lout_optimal_white)
+
+plot_coef$optimal <- 0
+plot_coef$optimal <- ifelse(plot_coef$window_size==floor(bw_amount_white), 1, 0)
+
+# # number of significant window sizes
+# nrow(plot_coef[plot_coef[,"pvalue"] < 0.051,])
+# 
+# # Mean coefficient
+# print(summary(plot_coef[,"coefficient"]))
+# # mean pvalue
+# print(summary(plot_coef[,"pvalue"]))
+
+# Plot --------------------------------------------------------------------
+ggplot(plot_coef, aes(x = window_size, y = coefficient, color=as.factor(optimal))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = coefficient - (2*se), ymax = coefficient + (2*se))) +
+  geom_hline(yintercept = 0,
+             linetype = "longdash",
+             color = "red") +
+  scale_color_manual(values = c("black","red")) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous("Window Size (Days)",
+                     breaks = seq(0, 90, by = 15)) +
+  labs(title = "Varying Window Sizes:",
+       subtitle = "The Effect of Political Protests on Donations to White Candidates") +
+  ylab("Increase in Federal Donations to White Candidates") +
+  geom_label(
+    label=str_wrap("Imbens-Kalyanaraman Optimal Bandwidth: 61 Days Coefficient: $3,336,866, P-Value: 0.007",46), 
+    x=33,
+    y=5000000,
+    label.padding = unit(0.1, "lines"), # Rectangle size around label
+    label.size = NA,
+    color = "black",
+    fill="#56B4E9",
+    size = 2.5
+  )
+```
+
+55 of 85 windows significant. Mean coefficient is 3700635 and median is 3437550. Mean p-value is 0.076 and the median p-value is 0.033.
+
+## S4I: African American Candidates v. White Candidates
+
+```{r}
+# optimal bandwidth - African Americans
+bw_amount_dta_aa_std <-subset(data_aa_amount_std, 
+                           days > 0 - bw_amount_aa & days < 0 + bw_amount_aa)
+# Full Data - Amount (optimal)
+lout_optimal_aa_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_aa_std)
+#summary(lout_optimal_aa_std)
+
+# optimal bandwidth - White
+bw_amount_dta_white_std <-subset(data_white_amount_std, 
+                           days > 0 - bw_amount_white & days < 0 + bw_amount_white)
+# Full Data - Amount (optimal)
+lout_optimal_white_std <- lm(amount_donations_standardized ~ days + I(days > 0), 
+                       data = bw_amount_dta_white_std)
+#summary(lout_optimal_white_std)
+
+```
+
+```{r}
+# stargazer(lout_optimal_aa,
+#           lout_optimal_white,
+#           style = "apsr")
+```
+
+\begin{table}[H] \centering 
+  \caption{The Effect of Political Protests on Donations} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lcc} 
+\\[-1.8ex]\hline \\[-1.8ex] 
+\\ \multicolumn{3}{c}{Dependent Variable: Daily Amount of FEC Campaign Contributions in US Dollars} \\ 
+\\[-1.8ex] & African American Candidates & White Candidates\\ 
+\hline \\[-1.8ex] 
+Impact of Political Protests & 342,166.000$^{***}$ & 3,336,866.000$^{***}$ \\ 
+  & (98,033.000) & (1,213,420.000) \\ 
+ Forcing Variable (Time) & 2,696.000 & 15,716.000 \\ 
+  & (3,204.000) & (31,369.000) \\ 
+  &  &  \\ 
+  &  &  \\ 
+  Constant & 434,547.000$^{***}$ & 6,069,306.000$^{***}$ \\ 
+  & (53,975.000) & (670,220.000) \\ 
+ N & 53 & 67 \\ 
+R$^{2}$ & 0.590 & 0.389 \\ 
+Adjusted R$^{2}$ & 0.573 & 0.370 \\ 
+Residual Std. Error & 178,392.000 (df = 50) & 2,482,791.000 (df = 64) \\ 
+F Statistic & 36.000$^{***}$ (df = 2; 50) & 20.400$^{***}$ (df = 2; 64) \\ 
+\hline \\[-1.8ex] 
+\multicolumn{3}{l}{$^{*}$p $<$ .1; $^{**}$p $<$ .05; $^{***}$p $<$ .01} \\ 
+\end{tabular} 
+\end{table}
+
+# S5: EDA on CCC Protest Data
+
+## S5A: Geographic Plot of Protests
+
+```{r}
+##### Plot Protest activity across the United States
+# Data wrangling
+protest_weekly_large <- protest_data_full %>% 
+  filter(weekly == 1,large == 0) %>% 
+  group_by(fips_code) %>% 
+  summarise(n_total = sum(n)) %>% 
+  rename(fips = fips_code) %>% 
+  mutate(protest_count = log(n_total+1))
+# Create Map
+plot_usmap(regions = "counties",labels = F,                
+    data = protest_weekly_large, exclude = c("Hawaii", "Alaska","DC"),
+    values = "protest_count", color = "black") + 
+    scale_fill_gradient(
+      low = "white", high = "red", 
+      name = "Protest Activity (log)", 
+      label = scales::comma) + 
+    labs(title = "Protest Activity By County (2017-2021)") +
+    theme(legend.position = "right")
+```
+
+Protests tend to cluster in heavily populated, liberal, coastal regions.
+
+```{r}
+# Histogram of Logged Number of (large) Protests Over time
+protest_data_full %>% 
+  filter(weekly == 1,large == 1) %>% 
+  group_by(fips_code) %>% 
+  summarise(n_total = sum(n)) %>%
+  mutate(protest_count = log(n_total+1)) %>% 
+  ggplot() +
+  geom_histogram(aes(x = protest_count), bins = 80, fill = "blue") +
+  labs(title = "Distribution of Large Protests by County (2017-2021)", 
+       x = "Logged Number of Protests in a County Overtime" , 
+       y = "Number of Counties",
+       caption = "Note: Protests include all protest events that involved more than 30 participants") 
+
+```
+
+Protests are rare events. The vast majority of counties do not have any (large) protests in the years 2017 to 2021. Large protests are defined as protests containing more than 30 people.
+
+```{r}
+# Histogram of Logged Number of Protests Over time (all protests)
+protest_data_full %>% 
+  filter(weekly == 1,large == 0, liberal == 0, conservative == 0, 
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  group_by(fips_code) %>% 
+  summarise(n_total = sum(n)) %>%
+  mutate(protest_count = log(n_total+1)) %>% 
+  ggplot() +
+  geom_histogram(aes(x = protest_count), bins = 80, fill = "blue") +
+  labs(title = "Distribution of Total Protests by County (2017-2021)", 
+       x = "Logged Number of Protests in a County Overtime" , 
+       y = "Number of Counties") 
+
+```
+
+Even when examining all protests in the dataset, most counties had zero protest activity over time.
+
+```{r}
+# Histogram of  Number of Protests Over time by party (all protests)
+plot_liberal <- protest_data_full %>% 
+  filter(weekly == 1,large == 0, liberal == 1, conservative == 0, 
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  group_by(year) %>% 
+  summarise(n_total = sum(n)) %>%
+  ggplot(aes(x = as.factor(year), y = n_total, fill = "blue")) +
+  geom_col() +
+  labs(y = "Number of Protests",
+       x = "Year",
+       title = "Distribution of Liberal Protests by Year") +
+  theme(legend.position="none") +
+  scale_fill_manual(values = "blue") +
+  scale_y_continuous(limits = c(0, 8000))
+
+# Histogram of  Number of Protests Over time by party (all protests)
+plot_conservative <- protest_data_full %>% 
+  filter(weekly == 1,large == 0, liberal == 0, conservative == 1, 
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  group_by(year) %>% 
+  summarise(n_total = sum(n)) %>%
+  ggplot(aes(x = as.factor(year), y = n_total, fill = "blue")) +
+  geom_col() +
+  labs(y = "Number of Protests",
+       x = "Year",
+       title = "Distribution of Conservative Protests by Year") +
+  theme(legend.position="none") +
+  scale_fill_manual(values = "red") +
+  scale_y_continuous(limits = c(0, 8000))
+
+# arrange plots together
+grid.arrange(plot_liberal, plot_conservative, nrow=2)
+```
+Liberal protests are far more common than conservative protests. Liberal protests were far more common in 2018 and 2020. 2018 has far more protests because A) January Women's Marches across the country and B) March for Our Lives gun control marches. 2020 has far more protests because of the BLM protests surrounded the killing of George Floyd.
+
+```{r}
+# Data wrangling
+protest_weekly_region <- protest_data_full %>% 
+  left_join(state_county_walkover, by = c("fips_code"="fips")) %>% 
+  filter(weekly == 1, large == 1) %>% 
+  group_by(fips_code, division_name) %>% 
+  summarise(n_total = sum(n))
+# Summary statistics of protests by week
+summary(protest_weekly_region$n_total)
+(quantiles_protest <- quantile(protest_weekly_region$n_total, probs = seq(0, 1, 1/20)))
+nrow(protest_weekly_region[protest_weekly_region$n_total==0,])/nrow(protest_weekly_region)
+
+protest_weekly_region %>% 
+  # examine only the top 10 percent of counties
+  filter(n_total >= quantiles_protest[[19]]) %>% 
+  ggplot(aes(x = forcats::fct_reorder(as.factor(fips_code), n_total, .desc = FALSE), y = n_total, fill = division_name)) +
+  geom_col() +
+  labs(y = "Number of Protests",
+       x = "County (Grouped by Census Region)",
+       title = "Distribution of Large Protests by County (Top 10th Percentile of Protest Activity Only)",
+       caption = "Note: Protests include all protest events that involved more than 30 participants") +
+  theme(axis.text.y = element_blank()) +
+  scale_fill_discrete(name = "Census Region") +
+  coord_flip()
+
+```
+
+Some counties have significant protest activity, whereas 50.4 percent of counties do not have any (large) protests. 
+
+## S5B: Temporal Plot of Protests
+
+```{r}
+# Protests over time
+
+##### Add in date and time information
+protest_data_overtime <- protest_data_full %>% 
+  left_join(state_county_walkover, by = c("fips_code"="fips")) %>% 
+  filter(weekly == 0,large == 1) %>% 
+  group_by(date) %>% 
+  summarise(n_total = sum(n)) %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d"),
+         year = as.factor(year(date)),
+         yearmonth = as.factor(as.yearmon(date)),
+         month = as.character(month(date)),
+         month = dplyr::recode(month, "1" = "Jan.",
+                              "2" = "Feb.",
+                              "3" = "March",
+                              "4" = "April",
+                              "5" = "May",
+                              "6" = "June",
+                              "7" = "July",
+                              "8" = "Aug.",
+                              "9" = "Sept.",
+                              "10" = "Oct.",
+                              "11" = "Nov.",
+                              "12" = "Dec."),
+         month = factor(month, levels = c("Jan.",
+                                          "Feb.",
+                                          "March",
+                                          "April",
+                                          "May",
+                                          "June",
+                                          "July",
+                                          "Aug.",
+                                          "Sept.",
+                                          "Oct.",
+                                          "Nov.",
+                                          "Dec.")),
+         startdate = "2017-01-01",
+         startdate = as.Date(startdate, format = "%Y-%m-%d"),
+         week = as.numeric(ceiling(difftime(date, startdate, units = "weeks")))+1,
+         weekdays = as.character(weekdays(date)),
+         weekdays = factor(weekdays, levels = c("Monday",
+                                          "Tuesday",
+                                          "Wednesday",
+                                          "Thursday",
+                                          "Friday",
+                                          "Saturday",
+                                          "Sunday")),
+         # Manually handle outlier (women's protest on 2018-03-14)
+         n_total = case_when(as.character(date) == "2018-03-14" ~ sort(n_total,
+                                                                       TRUE)[2],
+                              TRUE ~ n_total))
+
+library(plyr)
+# Create monthweek variable
+protest_data_overtime <- plyr::ddply(protest_data_overtime, 
+                                     .(yearmonth), transform, 
+                                     monthweek = 1 + week - min(week))
+detach("package:plyr")
+
+##### Create grouping function
+
+calendar_plot <- function(title, fill, data) {
+  plot <- ggplot(data, aes(monthweek, weekdays, fill = n_total)) +
+    geom_tile(colour = "white") +
+    facet_grid(year ~ month) +
+    scale_fill_gradient(low = "white", high = "red") +
+    labs(
+      x = "Week of Month",
+      y = "",
+      title = title,
+      fill = fill,
+      caption = caption
+    )
+}
+
+wrapper <- function(x, ...) 
+{
+  paste(strwrap(x, ...), collapse = "\n")
+}
+
+title <- "Protest Activity Over Time"
+fill <- "# of Protests"
+caption = wrapper("Note: The number of protests on March 14th, 2018 is actually 3,620 because of the nationwide gun reform protests. For data visualization purposes, I treat this observation as an outlier and replace its value with the second highest number of protests, which is 631.", width = 80)
+plot <- calendar_plot(title, fill, protest_data_overtime)
+plot
+```
+
+Significant spike in protest activity following the police killing of George Floyd in 2020 (May 25th, 2020). Moreover, 2020 has more protest activity than any other year.
+
+```{r}
+# Protests over time
+
+##### Add in date and time information
+protest_data_overtime_2018 <- protest_data_full %>% 
+  left_join(state_county_walkover, by = c("fips_code"="fips")) %>% 
+  filter(weekly == 0,large == 1) %>% 
+  mutate(year = substr(date, 1, 4)) %>% 
+  filter(year == "2018") %>% 
+  group_by(date) %>% 
+  summarise(n_total = sum(n)) %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d"),
+         year = as.factor(year(date)),
+         yearmonth = as.factor(as.yearmon(date)),
+         month = as.character(month(date)),
+         month = dplyr::recode(month, "1" = "Jan.",
+                              "2" = "Feb.",
+                              "3" = "March",
+                              "4" = "April",
+                              "5" = "May",
+                              "6" = "June",
+                              "7" = "July",
+                              "8" = "Aug.",
+                              "9" = "Sept.",
+                              "10" = "Oct.",
+                              "11" = "Nov.",
+                              "12" = "Dec."),
+         month = factor(month, levels = c("Jan.",
+                                          "Feb.",
+                                          "March",
+                                          "April",
+                                          "May",
+                                          "June",
+                                          "July",
+                                          "Aug.",
+                                          "Sept.",
+                                          "Oct.",
+                                          "Nov.",
+                                          "Dec.")),
+         startdate = "2017-01-01",
+         startdate = as.Date(startdate, format = "%Y-%m-%d"),
+         week = as.numeric(ceiling(difftime(date, startdate, units = "weeks")))+1,
+         weekdays = as.character(weekdays(date)),
+         weekdays = factor(weekdays, levels = c("Monday",
+                                          "Tuesday",
+                                          "Wednesday",
+                                          "Thursday",
+                                          "Friday",
+                                          "Saturday",
+                                          "Sunday")),
+         # Manually handle outlier (women's protest on 2018-03-14)
+         n_total = case_when(as.character(date) == "2018-03-14" ~ sort(n_total,
+                                                                       TRUE)[2],
+                              TRUE ~ n_total))
+
+##### Add in date and time information
+protest_data_overtime_2020 <- protest_data_full %>% 
+  left_join(state_county_walkover, by = c("fips_code"="fips")) %>% 
+  filter(weekly == 0,large == 1) %>% 
+  mutate(year = substr(date, 1, 4)) %>% 
+  filter(year == "2020") %>% 
+  group_by(date) %>% 
+  summarise(n_total = sum(n)) %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d"),
+         year = as.factor(year(date)),
+         yearmonth = as.factor(as.yearmon(date)),
+         month = as.character(month(date)),
+         month = dplyr::recode(month, "1" = "Jan.",
+                              "2" = "Feb.",
+                              "3" = "March",
+                              "4" = "April",
+                              "5" = "May",
+                              "6" = "June",
+                              "7" = "July",
+                              "8" = "Aug.",
+                              "9" = "Sept.",
+                              "10" = "Oct.",
+                              "11" = "Nov.",
+                              "12" = "Dec."),
+         month = factor(month, levels = c("Jan.",
+                                          "Feb.",
+                                          "March",
+                                          "April",
+                                          "May",
+                                          "June",
+                                          "July",
+                                          "Aug.",
+                                          "Sept.",
+                                          "Oct.",
+                                          "Nov.",
+                                          "Dec.")),
+         startdate = "2017-01-01",
+         startdate = as.Date(startdate, format = "%Y-%m-%d"),
+         week = as.numeric(ceiling(difftime(date, startdate, units = "weeks")))+1,
+         weekdays = as.character(weekdays(date)),
+         weekdays = factor(weekdays, levels = c("Monday",
+                                          "Tuesday",
+                                          "Wednesday",
+                                          "Thursday",
+                                          "Friday",
+                                          "Saturday",
+                                          "Sunday")),
+         # Manually handle outlier (women's protest on 2018-03-14)
+         n_total = case_when(as.character(date) == "2018-03-14" ~ sort(n_total,
+                                                                       TRUE)[2],
+                              TRUE ~ n_total))
+
+library(plyr)
+# Create monthweek variable
+protest_data_overtime_2018 <- plyr::ddply(protest_data_overtime_2018, 
+                                     .(yearmonth), transform, 
+                                     monthweek = 1 + week - min(week))
+
+# Create monthweek variable
+protest_data_overtime_2020 <- plyr::ddply(protest_data_overtime_2020, 
+                                     .(yearmonth), transform, 
+                                     monthweek = 1 + week - min(week))
+detach("package:plyr")
+
+# plot
+caption <- NULL
+title <- "Protest Activity 2018"
+fill <- "# of Protests"
+plot_2018 <- calendar_plot(title, fill, protest_data_overtime_2018)
+title <- "Protest Activity 2020"
+plot_2020 <- calendar_plot(title, fill, protest_data_overtime_2020)
+
+# arrange plots together
+grid.arrange(plot_2018, plot_2020, nrow=2)
+```
+2018 protest activity is largely driven by A) January Women's Marches across the coutnry and B) March for Our Lives gun control marches. 2020 protest activity is driven by the BLM protests following the killing of George Floyd. It's also worth highlighting that protest activity is higher on Saturdays.
+
+# S6: Additional Difference-in-Differences Analysis
+
+```{r, eval=FALSE}
+### Primary Protest Datasets
+
+# 1) `protest_weekly_all`: The number of weekly protests that occur in an American county for every year from 2017 to 2021 (ID is weekly = 1).
+protest_weekly_all <- protest_data_full %>% 
+  filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 2) `protest_daily_all`: The number of daily protests that occur in an American county for every year from 2017 to 2021 (ID is weekly = 0).
+protest_daily_all <- protest_data_full %>%
+  filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 3) `protest_weekly_large`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people (ID is weekly = 1 and large = 1). 
+protest_weekly_large <- protest_data_full %>% 
+  filter(weekly == 1, large == 1, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 4) `protest_daily_large` is the same as `protest_weekly_large` but with daily protest data (ID is weekly = 0 and large = 1).
+protest_daily_large <- protest_data_full %>%
+  filter(weekly == 0, large == 1, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 5) `protest_grouped_week_liberal`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and are labeled as liberal protests (ID is weekly = 1 and liberal = 1). 
+protest_grouped_week_liberal <- protest_data_full %>% 
+  filter(weekly == 1, large == 0, liberal == 1, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 6) `protest_grouped_daily_liberal` is the same as `protest_grouped_week_liberal` but with daily data (ID is weekly = 0 and liberal = 1).
+protest_grouped_daily_liberal <- protest_data_full %>%
+  filter(weekly == 0, large == 0, liberal == 1, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 7) `protest_grouped_week_conservative`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and are labeled as conservative protests (ID is weekly = 1 and conservative = 1).
+protest_grouped_week_conservative <- protest_data_full %>% 
+  filter(weekly == 1, large == 0, liberal == 0, conservative == 1,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 8) `protest_grouped_daily_conservative` is the same as `protest_grouped_week_conservative` but daily data (ID is weekly = 0 and conservative = 1).
+protest_grouped_daily_conservative <- protest_data_full %>%
+  filter(weekly == 0, large == 0, liberal == 0, conservative == 1,
+         onlyprotest == 0, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+### Supplemental dataframes: 
+
+# 9) `protest_weekly_onlyprotests`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and only includes protest activities explicitly labeled as "protests." (ID is weekly = 1 and onlyprotest = 1). 
+protest_weekly_onlyprotests <- protest_data_full %>% 
+  filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 1, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 10) `protest_daily_onlyprotests` is the same as `protest_weekly_onlyprotests` but daily (ID is weekly = 0 and onlyprotest = 1).
+protest_daily_onlyprotests <- protest_data_full %>%
+  filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 1, norallies == 0, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 11) `protest_weekly_norallies`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and excludes any protest activities explicitly labeled as "rallies." (ID is weekly = 1 and norallies = 1).
+protest_weekly_norallies <- protest_data_full %>% 
+  filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 1, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+# 12) `protest_daily_norallies` is the same as `protest_weekly_norallies` but daily (ID is weekly = 0 and norallies = 1).
+protest_daily_norallies <- protest_data_full %>%
+  filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 1, salient == 0) %>% 
+  rename("number_protests" = "n")
+
+
+# 13) `protest_weekly_salient`: Subset of `protest_weekly_all` that limits to protests that include more than 30 people and only includes protest activities resulting in an arrest, property damage, or injuries. (ID is weekly = 1 and salient = 1).
+protest_weekly_salient <- protest_data_full %>% 
+  filter(weekly == 1, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 1) %>% 
+  rename("number_protests" = "n")
+
+# 14) `protest_daily_salient` is the same as `protest_weekly_salient` but daily (ID is weekly = 0 and salient = 1).
+protest_daily_salient <- protest_data_full %>%
+  filter(weekly == 0, large == 0, liberal == 0, conservative == 0,
+         onlyprotest == 0, norallies == 0, salient == 1) %>% 
+  rename("number_protests" = "n")
+
+```
+
+```{r, eval=FALSE}
+# 1) number and amount of weekly donations by county
+# Number of donations
+fec_total_weekly_county <- fec_weekly_daily %>% 
+  filter(week_id == 1, is.na(amount_donations), 
+         is.na(R), is.na(D)) %>% 
+  select(date, COUNTY, year, number_donations)
+# Amount of donations (combined with number of donations)
+fec_total_weekly_county <- fec_weekly_daily %>% 
+  filter(week_id == 1, is.na(number_donations), 
+         is.na(R), is.na(D)) %>% 
+  select(date, COUNTY, year, amount_donations) %>% 
+  left_join(fec_total_weekly_county, by = c("date", "COUNTY", "year"))
+
+# 2) number and amount of donations by week per county made to Republicans
+fec_total_weekly_county_R <- fec_weekly_daily %>% 
+  filter(week_id == 1, !is.na(R), is.na(D)) %>% 
+  select(date, COUNTY, year, number_donations, amount_donations)
+
+# 3) number and amount of donations by week per county made to Democrats
+fec_total_weekly_county_D <- fec_weekly_daily %>% 
+  filter(week_id == 1, is.na(R), !is.na(D)) %>% 
+  select(date, COUNTY, year, number_donations, amount_donations)
+
+# 4) number and amount of daily donations by county
+# Number of donations
+fec_total_daily_county <- fec_weekly_daily %>%
+  filter(week_id == 0, is.na(amount_donations),
+         is.na(R), is.na(D)) %>%
+  select(date, COUNTY, year, number_donations)
+# Amount of donations (combined with number of donations)
+fec_total_daily_county <- fec_weekly_daily %>%
+  filter(week_id == 0, is.na(number_donations),
+         is.na(R), is.na(D)) %>%
+  select(date, COUNTY, year, amount_donations) %>%
+  left_join(fec_total_daily_county, by = c("date", "COUNTY", "year"))
+
+# 5) number and amount of donations daily per county made to Republicans
+fec_total_daily_county_R <- fec_weekly_daily %>%
+  filter(week_id == 0, !is.na(R), is.na(D))
+
+# 6) number and amount of donations daily per county made to Democrats
+fec_total_daily_county_D <- fec_weekly_daily %>%
+  filter(week_id == 0, is.na(R), !is.na(D))
+
+```
+
+```{r, eval=FALSE}
+feature_transform <- function(protest_data, fec_data, daily){
+  # Join Protest to FEC data
+  if (daily == FALSE){
+    data <- protest_data %>% 
+      mutate(date = as.integer(date)) %>% 
+      inner_join(fec_data, by = c("date", "fips_code" = "COUNTY", "year"))
+      
+  } else {
+    data <- protest_data %>% 
+      inner_join(fec_data, by = c("date", "fips_code" = "COUNTY"))
+  }
+  
+  # 1) log DV
+  fec_log_DV <- data %>%
+    mutate(number_donations = log(number_donations+1),
+           amount_donations = log(amount_donations+1))
+  
+  # 2) log log
+  fec_log_log <- data %>% 
+    mutate(n = log(number_protests+1),
+           number_donations = log(number_donations+1),
+           amount_donations = log(amount_donations+1))
+  
+  # 3) Lag DV and IV
+  fec_lag <- data %>% 
+    group_by(fips_code) %>% 
+    mutate(lag_week_protest = lag(number_protests, order_by = fips_code),
+           lag_week_donation_count = lag(number_donations, order_by = fips_code),
+           lag_week_donation_amount = lag(amount_donations, order_by = fips_code)) %>% 
+    ungroup() %>% 
+    filter(date !=1)
+  
+  # 4) Lag Log DV and IV
+  fec_lag_log_DV <- fec_log_DV %>% 
+    group_by(fips_code) %>% 
+    mutate(lag_week_protest = lag(number_protests, order_by = fips_code),
+           lag_week_donation_count = lag(number_donations, order_by = fips_code),
+           lag_week_donation_amount = lag(amount_donations, order_by = fips_code)) %>% 
+    ungroup() %>% 
+    filter(date !=1)
+  
+  # 5) Lag Log DV and log IV
+  fec_lag_log_log <- fec_log_log %>% 
+    group_by(fips_code) %>% 
+    mutate(lag_week_protest = lag(number_protests, order_by = fips_code),
+           lag_week_donation_count = lag(number_donations, order_by = fips_code),
+           lag_week_donation_amount = lag(amount_donations, order_by = fips_code)) %>% 
+    ungroup() %>% 
+    filter(date !=1)
+
+  # combine into list
+  out <- list(data,
+              fec_log_DV,
+              fec_log_log,
+              fec_lag,
+              fec_lag_log_DV,
+              fec_lag_log_log)
+  return(out)
+}
+
+```
+
+```{r, eval=FALSE}
+
+run_regression <- function(data, number, lag){
+  if (lag == FALSE & number == TRUE){
+    model <- fixest::feols(number_donations ~ number_protests | factor (fips_code) + factor(year) + factor(date), 
+                         data = data)
+  } else if (lag == FALSE & number == FALSE){
+    model <- fixest::feols(amount_donations ~ number_protests | factor (fips_code) + factor(year) + factor(date), 
+                         data = data)
+  } else if (lag == TRUE & number == TRUE) {
+    model <- fixest::feols(number_donations ~ number_protests + lag_week_donation_count + lag_week_protest | factor(fips_code) + factor(year) + factor(date), 
+                         data = data)
+  } else if (lag == TRUE & number == FALSE) {
+    model <- fixest::feols(amount_donations ~ number_protests + lag_week_donation_amount + lag_week_protest | factor(fips_code) + factor(year) + factor(date), 
+                         data = data)
+  }
+  return(model)
+}
+
+# Create function to extract regression coefficients
+return_coefficients <- function(input_mat, summary_data, model_rows, 
+                                 model_type, var1, var2, var3, lag){
+  input_mat[model_rows, 1] <- model_type
+  input_mat[var1, 2] <- rownames(summary_data)[1]
+  input_mat[var1, 3] <- round(summary_data[[1, 1]], 3)
+  input_mat[var1, 4] <- round(summary_data[[1, 2]], 3)
+  input_mat[var1, 5] <- round(summary_data[[1, 3]], 3)
+  input_mat[var1, 6] <- round(summary_data[[1, 4]], 6)
+  
+  if (lag == TRUE){
+    input_mat[var2, 2] <- rownames(summary_data)[2]
+    input_mat[var2, 3] <- round(summary_data[[2, 1]], 3)
+    input_mat[var2, 4] <- round(summary_data[[2, 2]], 3)
+    input_mat[var2, 5] <- round(summary_data[[2, 3]], 3)
+    input_mat[var2, 6] <- round(summary_data[[2, 4]], 6)
+    input_mat[var3, 2] <- rownames(summary_data)[3]
+    input_mat[var3, 3] <- round(summary_data[[3, 1]], 3)
+    input_mat[var3, 4] <- round(summary_data[[3, 2]], 3)
+    input_mat[var3, 5] <- round(summary_data[[3, 3]], 3)
+    input_mat[var3, 6] <- round(summary_data[[3, 4]], 6)
+  }
+  return(input_mat)
+}
+
+analyze_data <- function(data_ls){
+  
+  # Initialize matrix to store coefficients
+  mat <- matrix(nrow = 24, ncol = 6)
+  
+  ##### 1) Analysis on full data
+  data_standard <- data_ls[[1]]
+  # dv: number of donations
+  model1_num <- run_regression(data_standard, TRUE, FALSE)
+  model1_num_summary <- summary(model1_num)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Base Model - Number Donations"
+  mat <- return_coefficients(mat, model1_num_summary, 1, 
+                      model_type, 1, NULL, NULL, FALSE)
+  # dv: amount of donations
+  model1_amount <- run_regression(data_standard, FALSE, FALSE)
+  model1_amount_summary <- summary(model1_amount)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Base Model - Amount Donations"
+  mat <- return_coefficients(mat, model1_amount_summary, 2, 
+                      model_type, 2, NULL, NULL, FALSE)
+  
+  ### 2) Analysis on data with logged DV
+  data_dvlog <- data_ls[[2]]
+  # dv: number of donations
+  model2_num <- run_regression(data_dvlog, TRUE, FALSE)
+  model2_num_summary <- summary(model2_num)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Logged DV - Number Donations"
+  mat <- return_coefficients(mat, model2_num_summary, 3, 
+                      model_type, 3, NULL, NULL, FALSE)
+  # dv: amount of donations
+  model2_amount <- run_regression(data_dvlog, FALSE, FALSE)
+  model2_amount_summary <- summary(model2_amount)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Logged DV - Amount Donations"
+  mat <- return_coefficients(mat, model2_amount_summary, 4, 
+                      model_type, 4, NULL, NULL, FALSE)
+  
+  ### 3) Analysis on data with logged DV and logged IV
+  data_loglog <- data_ls[[3]]
+  # dv: number of donations
+  model3_num <- run_regression(data_loglog, TRUE, FALSE)
+  model3_num_summary <- summary(model3_num)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Log-log - Number Donations"
+  mat <- return_coefficients(mat, model3_num_summary, 5, 
+                      model_type, 5, NULL, NULL, FALSE)
+  # dv: amount of donations
+  model3_amount <- run_regression(data_loglog, FALSE, FALSE)
+  model3_amount_summary <- summary(model3_amount)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Log-log - Amount Donations"
+  mat <- return_coefficients(mat, model3_amount_summary, 6, 
+                      model_type, 6, NULL, NULL, FALSE)
+  
+  ### 4) Analysis on data with lagged DV and IV --- MAIN MODEL
+  data_lag <- data_ls[[4]]
+  # dv: number of donations
+  model4_num <- run_regression(data_lag, TRUE, TRUE)
+  model4_num_summary <- summary(model4_num)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Lag - Number Donations"
+  mat <- return_coefficients(mat, model4_num_summary, 7:9, 
+                      model_type, 7, 8, 9, TRUE)
+  # dv: amount of donations
+  model4_amount <- run_regression(data_lag, FALSE, TRUE)
+  model4_amount_summary <- summary(model4_amount)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Lag - Amount Donations"
+  mat <- return_coefficients(mat, model4_amount_summary, 10:12, 
+                      model_type, 10, 11, 12, TRUE)
+  
+  ### 5) Analysis on data with lagged DV and IV and log of DV
+  data_lag_logDV <- data_ls[[5]]
+  # dv: number of donations
+  model5_num <- run_regression(data_lag_logDV, TRUE, TRUE)
+  model5_num_summary <- summary(model5_num)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Lag log-DV - Number Donations"
+  mat <- return_coefficients(mat, model5_num_summary, 13:15, 
+                      model_type, 13, 14, 15, TRUE)
+  # dv: amount of donations
+  model5_amount <- run_regression(data_lag_logDV, FALSE, TRUE)
+  model5_amount_summary <- summary(model5_amount)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Lag log-DV - Amount Donations"
+  mat <- return_coefficients(mat, model5_amount_summary, 16:18, 
+                      model_type, 16, 17, 18, TRUE)
+  
+  ### 6) Analysis on data with lagged DV and IV and log of DV and IV
+  data_lag_loglog <- data_ls[[6]]
+  # dv: number of donations
+  model6_num <- run_regression(data_lag_loglog, TRUE, TRUE)
+  model6_num_summary <- summary(model6_num)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Lag log-log - Number Donations"
+  mat <- return_coefficients(mat, model6_num_summary, 19:21, 
+                      model_type, 19, 20, 21, TRUE)
+  
+  # dv: amount of donations
+  model6_amount <- run_regression(data_lag_loglog, FALSE, TRUE)
+  model6_amount_summary <- summary(model6_amount)[["coeftable"]]
+  # extract coefficients from summary table
+  model_type <- "Lag log-log - Amount Donations"
+  mat <- return_coefficients(mat, model6_amount_summary, 22:24, 
+                      model_type, 22, 23, 24, TRUE)
+
+  colnames(mat) <- c("Model Type", "Variable Name", "Effect Size", "SE", "T-Value", "P-Value")
+  
+  return(mat)
+  
+}
+
+```
+
+## S6A: Analysis: Different Protest Measures
+
+### S6A1: All Protests in CCC Data
+
+```{r, eval=FALSE}
+# full protest data
+data_all <- feature_transform(protest_weekly_all, fec_total_weekly_county, FALSE)
+results_all <- analyze_data(data_all)
+#xtable(results_all)
+```
+
+\begin{table}[H]
+\caption{Independent Variable: All Protests in CCC Data} 
+\centering
+\begin{tabular}{rllllll}
+  \hline
+ & Model Type & Variable Name & Effect Size & SE & T-Value & P-Value \\ 
+  \hline
+1 & Base Model - Number Donations & number\_protests & 213.866 & 33.048 & 6.471 & 0 \\ 
+  2 & Base Model - Amount Donations & number\_protests & 26747.42 & 3080.627 & 8.682 & 0 \\ 
+  3 & Logged DV - Number Donations & number\_protests & 0.002 & 0.002 & 1.068 & 0.285397 \\ 
+  4 & Logged DV - Amount Donations & number\_protests & -0.019 & 0.002 & -8.248 & 0 \\ 
+  5 & Log-log - Number Donations & number\_protests & 0.002 & 0.002 & 1.068 & 0.285397 \\ 
+  6 & Log-log - Amount Donations & number\_protests & -0.019 & 0.002 & -8.248 & 0 \\ 
+  7 & Lag - Number Donations & number\_protests & 193.419 & 29.939 & 6.46 & 0 \\ 
+  8 & Lag - Number Donations & lag\_week\_donation\_count & 0.052 & 0.002 & 20.945 & 0 \\ 
+  9 & Lag - Number Donations & lag\_week\_protest & -187.788 & 25.86 & -7.262 & 0 \\ 
+  10 & Lag - Amount Donations & number\_protests & 25786.626 & 2853.576 & 9.037 & 0 \\ 
+  11 & Lag - Amount Donations & lag\_week\_donation\_amount & -0.007 & 0.007 & -0.998 & 0.318295 \\ 
+  12 & Lag - Amount Donations & lag\_week\_protest & -23411.595 & 4526.306 & -5.172 & 0 \\ 
+  13 & Lag log-DV - Number Donations & number\_protests & 0.001 & 0.002 & 0.404 & 0.686046 \\ 
+  14 & Lag log-DV - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.224 & 0 \\ 
+  15 & Lag log-DV - Number Donations & lag\_week\_protest & -0.007 & 0.002 & -3.544 & 0.000399 \\ 
+  16 & Lag log-DV - Amount Donations & number\_protests & -0.018 & 0.002 & -7.826 & 0 \\ 
+  17 & Lag log-DV - Amount Donations & lag\_week\_donation\_amount & 0.031 & 0.002 & 18.028 & 0 \\ 
+  18 & Lag log-DV - Amount Donations & lag\_week\_protest & 0.009 & 0.002 & 5.33 & 0 \\ 
+  19 & Lag log-log - Number Donations & number\_protests & 0.001 & 0.002 & 0.404 & 0.686046 \\ 
+  20 & Lag log-log - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.224 & 0 \\ 
+  21 & Lag log-log - Number Donations & lag\_week\_protest & -0.007 & 0.002 & -3.544 & 0.000399 \\ 
+  22 & Lag log-log - Amount Donations & number\_protests & -0.018 & 0.002 & -7.826 & 0 \\ 
+  23 & Lag log-log - Amount Donations & lag\_week\_donation\_amount & 0.031 & 0.002 & 18.028 & 0 \\ 
+  24 & Lag log-log - Amount Donations & lag\_week\_protest & 0.009 & 0.002 & 5.33 & 0 \\ 
+   \hline
+\end{tabular}
+\end{table}
+
+Results when applying log transformation are null possibly because the CCC dataset includes many minor protests (e.g., smaller than 5-10 people).
+
+### S6A2: Protests Containing More than 30 Participants (Main Model)
+
+```{r, eval=FALSE}
+# large protests
+data_large <- feature_transform(protest_weekly_large, fec_total_weekly_county, FALSE)
+results_large <- analyze_data(data_large)
+#xtable(results_large)
+```
+
+\begin{table}[H]
+\caption{Independent Variable: Protests Containing More than 30 Participants} 
+\centering
+\begin{tabular}{rllllll}
+  \hline
+ & Model Type & Variable Name & Effect Size & SE & T-Value & P-Value \\ 
+  \hline
+1 & Base Model - Number Donations & number\_protests & 104.731 & 23.284 & 4.498 & 7e-06 \\ 
+  2 & Base Model - Amount Donations & number\_protests & 18885.308 & 2009.843 & 9.396 & 0 \\ 
+  3 & Logged DV - Number Donations & number\_protests & 0.008 & 0.002 & 3.774 & 0.000164 \\ 
+  4 & Logged DV - Amount Donations & number\_protests & 0.013 & 0.003 & 3.845 & 0.000123 \\ 
+  5 & Log-log - Number Donations & number\_protests & 0.008 & 0.002 & 3.774 & 0.000164 \\ 
+  6 & Log-log - Amount Donations & number\_protests & 0.013 & 0.003 & 3.845 & 0.000123 \\ 
+  7 & Lag - Number Donations & number\_protests & 97.837 & 23.32 & 4.195 & 2.8e-05 \\ 
+  8 & Lag - Number Donations & lag\_week\_donation\_count & 0.057 & 0.003 & 20.479 & 0 \\ 
+  9 & Lag - Number Donations & lag\_week\_protest & -196.018 & 17.672 & -11.092 & 0 \\ 
+  10 & Lag - Amount Donations & number\_protests & 17608.605 & 1980.024 & 8.893 & 0 \\ 
+  11 & Lag - Amount Donations & lag\_week\_donation\_amount & 0.001 & 0.007 & 0.09 & 0.928292 \\ 
+  12 & Lag - Amount Donations & lag\_week\_protest & -21301.896 & 2158.023 & -9.871 & 0 \\ 
+  13 & Lag log-DV - Number Donations & number\_protests & 0.006 & 0.002 & 3.531 & 0.000421 \\ 
+  14 & Lag log-DV - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.229 & 0 \\ 
+  15 & Lag log-DV - Number Donations & lag\_week\_protest & -0.008 & 0.003 & -2.934 & 0.003367 \\ 
+  16 & Lag log-DV - Amount Donations & number\_protests & 0.013 & 0.003 & 3.921 & 9e-05 \\ 
+  17 & Lag log-DV - Amount Donations & lag\_week\_donation\_amount & 0.03 & 0.002 & 18.01 & 0 \\ 
+  18 & Lag log-DV - Amount Donations & lag\_week\_protest & 0.015 & 0.003 & 5.914 & 0 \\ 
+  19 & Lag log-log - Number Donations & number\_protests & 0.006 & 0.002 & 3.531 & 0.000421 \\ 
+  20 & Lag log-log - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.229 & 0 \\ 
+  21 & Lag log-log - Number Donations & lag\_week\_protest & -0.008 & 0.003 & -2.934 & 0.003367 \\ 
+  22 & Lag log-log - Amount Donations & number\_protests & 0.013 & 0.003 & 3.921 & 9e-05 \\ 
+  23 & Lag log-log - Amount Donations & lag\_week\_donation\_amount & 0.03 & 0.002 & 18.01 & 0 \\ 
+  24 & Lag log-log - Amount Donations & lag\_week\_protest & 0.015 & 0.003 & 5.914 & 0 \\ 
+   \hline
+\end{tabular}
+\end{table}
+
+Main model.
+
+### S6A3: Only CCC Events Explicitly Labeled as Protests
+
+```{r, eval=FALSE}
+# only protests
+data_protestsonly <- feature_transform(protest_weekly_onlyprotests, 
+                                       fec_total_weekly_county, FALSE)
+results_protestsonly <- analyze_data(data_protestsonly)
+#xtable(results_protestsonly)
+```
+
+\begin{table}[H]
+\caption{Independent Variable: Only CCC Events Explicitly Labeled as Protests} 
+\centering
+\begin{tabular}{rllllll}
+  \hline
+ & Model Type & Variable Name & Effect Size & SE & T-Value & P-Value \\ 
+  \hline
+1 & Base Model - Number Donations & number\_protests & 328.422 & 120.192 & 2.732 & 0.006321 \\ 
+  2 & Base Model - Amount Donations & number\_protests & 57304.28 & 14491.816 & 3.954 & 7.8e-05 \\ 
+  3 & Logged DV - Number Donations & number\_protests & 0.013 & 0.004 & 3.079 & 0.002092 \\ 
+  4 & Logged DV - Amount Donations & number\_protests & -0.045 & 0.008 & -5.632 & 0 \\ 
+  5 & Log-log - Number Donations & number\_protests & 0.013 & 0.004 & 3.079 & 0.002092 \\ 
+  6 & Log-log - Amount Donations & number\_protests & -0.045 & 0.008 & -5.632 & 0 \\ 
+  7 & Lag - Number Donations & number\_protests & 329.078 & 119.719 & 2.749 & 0.006016 \\ 
+  8 & Lag - Number Donations & lag\_week\_donation\_count & 0.057 & 0.003 & 19.776 & 0 \\ 
+  9 & Lag - Number Donations & lag\_week\_protest & -234.055 & 51.835 & -4.515 & 7e-06 \\ 
+  10 & Lag - Amount Donations & number\_protests & 54473.621 & 14108.532 & 3.861 & 0.000115 \\ 
+  11 & Lag - Amount Donations & lag\_week\_donation\_amount & 0.003 & 0.007 & 0.345 & 0.730036 \\ 
+  12 & Lag - Amount Donations & lag\_week\_protest & -38697.459 & 11072.533 & -3.495 & 0.000481 \\ 
+  13 & Lag log-DV - Number Donations & number\_protests & 0.008 & 0.004 & 2.086 & 0.037049 \\ 
+  14 & Lag log-DV - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.227 & 0 \\ 
+  15 & Lag log-DV - Number Donations & lag\_week\_protest & -0.018 & 0.003 & -6.719 & 0 \\ 
+  16 & Lag log-DV - Amount Donations & number\_protests & -0.046 & 0.008 & -5.663 & 0 \\ 
+  17 & Lag log-DV - Amount Donations & lag\_week\_donation\_amount & 0.031 & 0.002 & 18.021 & 0 \\ 
+  18 & Lag log-DV - Amount Donations & lag\_week\_protest & -0.058 & 0.006 & -9.913 & 0 \\ 
+  19 & Lag log-log - Number Donations & number\_protests & 0.008 & 0.004 & 2.086 & 0.037049 \\ 
+  20 & Lag log-log - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.227 & 0 \\ 
+  21 & Lag log-log - Number Donations & lag\_week\_protest & -0.018 & 0.003 & -6.719 & 0 \\ 
+  22 & Lag log-log - Amount Donations & number\_protests & -0.046 & 0.008 & -5.663 & 0 \\ 
+  23 & Lag log-log - Amount Donations & lag\_week\_donation\_amount & 0.031 & 0.002 & 18.021 & 0 \\ 
+  24 & Lag log-log - Amount Donations & lag\_week\_protest & -0.058 & 0.006 & -9.913 & 0 \\ 
+   \hline
+\end{tabular}
+\end{table}
+
+Interesting observation: the regression coefficients increase dramatically. Although some of the feature transformations eliminate the meaningful results.
+
+### S6A4: Excluding CCC Events Explicitly Labeled as Rallies
+
+```{r, eval=FALSE}
+# no rallies
+data_norallies <- feature_transform(protest_weekly_norallies, 
+                                       fec_total_weekly_county, FALSE)
+results_norallies <- analyze_data(data_norallies)
+#xtable(results_norallies)
+```
+
+\begin{table}[H]
+\caption{Independent Variable: Excluding CCC Events Explicitly Labeled as Rallies} 
+\centering
+\begin{tabular}{rllllll}
+  \hline
+ & Model Type & Variable Name & Effect Size & SE & T-Value & P-Value \\ 
+  \hline
+1 & Base Model - Number Donations & number\_protests & 55.564 & 15.013 & 3.701 & 0.000218 \\ 
+  2 & Base Model - Amount Donations & number\_protests & 14938.533 & 1790.886 & 8.341 & 0 \\ 
+  3 & Logged DV - Number Donations & number\_protests & 0.005 & 0.001 & 3.583 & 0.000345 \\ 
+  4 & Logged DV - Amount Donations & number\_protests & 0.014 & 0.003 & 3.908 & 9.5e-05 \\ 
+  5 & Log-log - Number Donations & number\_protests & 0.005 & 0.001 & 3.583 & 0.000345 \\ 
+  6 & Log-log - Amount Donations & number\_protests & 0.014 & 0.003 & 3.908 & 9.5e-05 \\ 
+  7 & Lag - Number Donations & number\_protests & 50.902 & 15.081 & 3.375 & 0.000746 \\ 
+  8 & Lag - Number Donations & lag\_week\_donation\_count & 0.055 & 0.003 & 20.486 & 0 \\ 
+  9 & Lag - Number Donations & lag\_week\_protest & -168.988 & 17.355 & -9.737 & 0 \\ 
+  10 & Lag - Amount Donations & number\_protests & 13754.805 & 1738.326 & 7.913 & 0 \\ 
+  11 & Lag - Amount Donations & lag\_week\_donation\_amount & 0 & 0.007 & -0.046 & 0.96358 \\ 
+  12 & Lag - Amount Donations & lag\_week\_protest & -18393.472 & 2034.441 & -9.041 & 0 \\ 
+  13 & Lag log-DV - Number Donations & number\_protests & 0.003 & 0.001 & 3.108 & 0.001898 \\ 
+  14 & Lag log-DV - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.226 & 0 \\ 
+  15 & Lag log-DV - Number Donations & lag\_week\_protest & -0.006 & 0.002 & -2.782 & 0.00544 \\ 
+  16 & Lag log-DV - Amount Donations & number\_protests & 0.014 & 0.003 & 3.957 & 7.8e-05 \\ 
+  17 & Lag log-DV - Amount Donations & lag\_week\_donation\_amount & 0.03 & 0.002 & 18.009 & 0 \\ 
+  18 & Lag log-DV - Amount Donations & lag\_week\_protest & 0.015 & 0.003 & 5.465 & 0 \\ 
+  19 & Lag log-log - Number Donations & number\_protests & 0.003 & 0.001 & 3.108 & 0.001898 \\ 
+  20 & Lag log-log - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.226 & 0 \\ 
+  21 & Lag log-log - Number Donations & lag\_week\_protest & -0.006 & 0.002 & -2.782 & 0.00544 \\ 
+  22 & Lag log-log - Amount Donations & number\_protests & 0.014 & 0.003 & 3.957 & 7.8e-05 \\ 
+  23 & Lag log-log - Amount Donations & lag\_week\_donation\_amount & 0.03 & 0.002 & 18.009 & 0 \\ 
+  24 & Lag log-log - Amount Donations & lag\_week\_protest & 0.015 & 0.003 & 5.465 & 0 \\ 
+   \hline
+\end{tabular}
+\end{table}
+
+Coefficients get smaller, but are consistently significant and positive. 
+
+### S6A5: Only Protests Resulting in Injury, Arrests, or Deaths
+
+```{r, eval=FALSE}
+# salient
+data_salient <- feature_transform(protest_weekly_salient, 
+                                       fec_total_weekly_county, FALSE)
+results_salient <- analyze_data(data_salient)
+#xtable(results_salient)
+```
+
+\begin{table}[H]
+\caption{Independent Variable: Only Protests Resulting in Injury, Arrests, or Deaths} 
+\centering
+\begin{tabular}{rllllll}
+  \hline
+ & Model Type & Variable Name & Effect Size & SE & T-Value & P-Value \\ 
+  \hline
+1 & Base Model - Number Donations & number\_protests & 2151.277 & 552.738 & 3.892 & 0.000101 \\ 
+  2 & Base Model - Amount Donations & number\_protests & 310147.84 & 84757.708 & 3.659 & 0.000257 \\ 
+  3 & Logged DV - Number Donations & number\_protests & -0.015 & 0.009 & -1.617 & 0.106065 \\ 
+  4 & Logged DV - Amount Donations & number\_protests & -0.177 & 0.018 & -9.581 & 0 \\ 
+  5 & Log-log - Number Donations & number\_protests & -0.015 & 0.009 & -1.617 & 0.106065 \\ 
+  6 & Log-log - Amount Donations & number\_protests & -0.177 & 0.018 & -9.581 & 0 \\ 
+  7 & Lag - Number Donations & number\_protests & 2142.204 & 552.433 & 3.878 & 0.000108 \\ 
+  8 & Lag - Number Donations & lag\_week\_donation\_count & 0.058 & 0.003 & 18.499 & 0 \\ 
+  9 & Lag - Number Donations & lag\_week\_protest & -698.615 & 222.515 & -3.14 & 0.001707 \\ 
+  10 & Lag - Amount Donations & number\_protests & 308804.96 & 84623.043 & 3.649 & 0.000267 \\ 
+  11 & Lag - Amount Donations & lag\_week\_donation\_amount & 0.001 & 0.007 & 0.209 & 0.834376 \\ 
+  12 & Lag - Amount Donations & lag\_week\_protest & -99226.691 & 36943.204 & -2.686 & 0.007271 \\ 
+  13 & Lag log-DV - Number Donations & number\_protests & -0.026 & 0.008 & -3.089 & 0.002023 \\ 
+  14 & Lag log-DV - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.222 & 0 \\ 
+  15 & Lag log-DV - Number Donations & lag\_week\_protest & -0.029 & 0.009 & -3.151 & 0.001643 \\ 
+  16 & Lag log-DV - Amount Donations & number\_protests & -0.18 & 0.019 & -9.462 & 0 \\ 
+  17 & Lag log-DV - Amount Donations & lag\_week\_donation\_amount & 0.03 & 0.002 & 18.013 & 0 \\ 
+  18 & Lag log-DV - Amount Donations & lag\_week\_protest & -0.101 & 0.015 & -6.928 & 0 \\ 
+  19 & Lag log-log - Number Donations & number\_protests & -0.026 & 0.008 & -3.089 & 0.002023 \\ 
+  20 & Lag log-log - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.222 & 0 \\ 
+  21 & Lag log-log - Number Donations & lag\_week\_protest & -0.029 & 0.009 & -3.151 & 0.001643 \\ 
+  22 & Lag log-log - Amount Donations & number\_protests & -0.18 & 0.019 & -9.462 & 0 \\ 
+  23 & Lag log-log - Amount Donations & lag\_week\_donation\_amount & 0.03 & 0.002 & 18.013 & 0 \\ 
+  24 & Lag log-log - Amount Donations & lag\_week\_protest & -0.101 & 0.015 & -6.928 & 0 \\ 
+   \hline
+\end{tabular}
+\end{table}
+
+Coefficients are huge, but the transformations result in inconsistent results.
+
+### S6A6: Excluding 2020 data
+
+```{r, eval=FALSE}
+##### Same thing - no 2020
+fec_no_2020 <- fec_total_weekly_county %>% 
+  filter(year != 2020)
+protest_no_2020 <- protest_weekly_all %>% 
+  filter(year != 2020)
+protest_large_no_2020 <- protest_weekly_large %>% 
+  filter(year != 2020)
+
+
+# full protest data
+data_all_no2020 <- feature_transform(protest_no_2020, fec_no_2020, FALSE)
+results_all_no2020 <- analyze_data(data_all)
+#xtable(results_all_no2020)
+```
+
+\begin{table}[ht]
+\caption{Excluding Any Data from 2020} 
+\centering
+\begin{tabular}{rllllll}
+  \hline
+ & Model Type & Variable Name & Effect Size & SE & T-Value & P-Value \\ 
+  \hline
+1 & Base Model - Number Donations & number\_protests & 213.866 & 33.048 & 6.471 & 0 \\ 
+  2 & Base Model - Amount Donations & number\_protests & 26747.42 & 3080.627 & 8.682 & 0 \\ 
+  3 & Logged DV - Number Donations & number\_protests & 0.002 & 0.002 & 1.068 & 0.285397 \\ 
+  4 & Logged DV - Amount Donations & number\_protests & -0.019 & 0.002 & -8.248 & 0 \\ 
+  5 & Log-log - Number Donations & number\_protests & 0.002 & 0.002 & 1.068 & 0.285397 \\ 
+  6 & Log-log - Amount Donations & number\_protests & -0.019 & 0.002 & -8.248 & 0 \\ 
+  7 & Lag - Number Donations & number\_protests & 193.419 & 29.939 & 6.46 & 0 \\ 
+  8 & Lag - Number Donations & lag\_week\_donation\_count & 0.052 & 0.002 & 20.945 & 0 \\ 
+  9 & Lag - Number Donations & lag\_week\_protest & -187.788 & 25.86 & -7.262 & 0 \\ 
+  10 & Lag - Amount Donations & number\_protests & 25786.626 & 2853.576 & 9.037 & 0 \\ 
+  11 & Lag - Amount Donations & lag\_week\_donation\_amount & -0.007 & 0.007 & -0.998 & 0.318295 \\ 
+  12 & Lag - Amount Donations & lag\_week\_protest & -23411.595 & 4526.306 & -5.172 & 0 \\ 
+  13 & Lag log-DV - Number Donations & number\_protests & 0.001 & 0.002 & 0.404 & 0.686046 \\ 
+  14 & Lag log-DV - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.224 & 0 \\ 
+  15 & Lag log-DV - Number Donations & lag\_week\_protest & -0.007 & 0.002 & -3.544 & 0.000399 \\ 
+  16 & Lag log-DV - Amount Donations & number\_protests & -0.018 & 0.002 & -7.826 & 0 \\ 
+  17 & Lag log-DV - Amount Donations & lag\_week\_donation\_amount & 0.031 & 0.002 & 18.028 & 0 \\ 
+  18 & Lag log-DV - Amount Donations & lag\_week\_protest & 0.009 & 0.002 & 5.33 & 0 \\ 
+  19 & Lag log-log - Number Donations & number\_protests & 0.001 & 0.002 & 0.404 & 0.686046 \\ 
+  20 & Lag log-log - Number Donations & lag\_week\_donation\_count & 0.037 & 0.002 & 15.224 & 0 \\ 
+  21 & Lag log-log - Number Donations & lag\_week\_protest & -0.007 & 0.002 & -3.544 & 0.000399 \\ 
+  22 & Lag log-log - Amount Donations & number\_protests & -0.018 & 0.002 & -7.826 & 0 \\ 
+  23 & Lag log-log - Amount Donations & lag\_week\_donation\_amount & 0.031 & 0.002 & 18.028 & 0 \\ 
+  24 & Lag log-log - Amount Donations & lag\_week\_protest & 0.009 & 0.002 & 5.33 & 0 \\ 
+   \hline
+\end{tabular}
+\end{table}
+
+Results are largely the same after excluding 2020 data.
+
+## S6B: Ideological Protests
+### S6B1: The Effect of Liberal Protests
+```{r, eval = FALSE}
+# Liberal Protests on Donations to Democrats
+data_dem <- feature_transform(protest_grouped_week_liberal,
+                              fec_total_weekly_county_D, FALSE)
+# Protests of more than 30 people
+
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_dem_lag <- data_dem[[4]]
+# dv: amount of donations
+model2_dem_amount <- summary(run_regression(data_dem_lag, FALSE, TRUE))
+
+
+# Liberal Protests on Donations to Republicans
+data_dem_rep <- feature_transform(protest_grouped_week_liberal,
+                              fec_total_weekly_county_R, FALSE)
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_dem_rep_lag <- data_dem_rep[[4]]
+# dv: amount of donations
+model2_dem_rep_amount <- summary(run_regression(data_dem_rep_lag, FALSE, TRUE))
+
+# etable(model2_dem_amount,
+#        model2_dem_rep_amount,
+#        tex = TRUE)
+
+```
+
+\begingroup
+\centering
+\begin{tabular}{lcc}
+\multicolumn{3}{c}{Independent Variable: Liberal Protests}
+   \tabularnewline \midrule \midrule
+   \multicolumn{3}{c}{Daily Amount of FEC Campaign Contributions in US Dollars}\\
+   Model:                         & Democrats (1)              & Republicans (2)\\  
+   \midrule
+   \emph{Variables}\\
+   Number of Liberal Protests               & 6,833.3$^{***}$  & 1,577.9$^{***}$\\   
+                                  & (1,155.8)        & (339.3)\\   
+   Lagged Donations    & 0.0257$^{**}$    & 0.0117\\   
+                                  & (0.0109)         & (0.0123)\\   
+   Lagged Protests             & -6,233.1$^{***}$ & -2,022.3$^{***}$\\   
+                                  & (1,174.8)        & (269.2)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   County            & Yes              & Yes\\  
+   Year                  & Yes              & Yes\\  
+   Week                  & Yes              & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations                   & 827,320          & 827,320\\  
+   R$^2$                          & 0.50962          & 0.42392\\  
+   Within R$^2$                   & 0.00348          & 0.00147\\  
+   \midrule \midrule
+   \multicolumn{3}{l}{\emph{Clustered (County) standard-errors in parentheses}}\\
+   \multicolumn{3}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup
+
+
+### S6B2: The Effect of Conservative Protests
+```{r, eval = FALSE}
+# Conservative Protests to rep
+data_rep <- feature_transform(protest_grouped_week_conservative,
+                              fec_total_weekly_county_R, FALSE)
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_rep_lag <- data_rep[[4]]
+# dv: amount of donations
+model2_rep_amount <- summary(run_regression(data_rep_lag, FALSE, TRUE))
+
+# Conservative Protests on Donations to Democrats
+data_rep_dem <- feature_transform(protest_grouped_week_conservative,
+                              fec_total_weekly_county_D, FALSE)
+
+### 2) Analysis on data with lagged DV and IV --- MAIN MODEL
+data_rep_dem_lag <- data_rep_dem[[4]]
+# dv: amount of donations
+model2_rep_dem_amount <- summary(run_regression(data_rep_dem_lag, FALSE, TRUE))
+
+# etable(model2_rep_amount,
+#           model2_rep_dem_amount,
+#           tex = TRUE)
+
+```
+
+\begingroup
+\centering
+\begin{tabular}{lcc}
+\multicolumn{3}{c}{Independent Variable: Conservative Protests}
+   \tabularnewline \midrule \midrule
+   \multicolumn{3}{c}{Daily Amount of FEC Campaign Contributions in US Dollars}\\
+   Model:                         & Republicans (1)               & Democrats (2)\\  
+   \midrule
+   \emph{Variables}\\
+   Number of Conservative Protests               & 42,247.3$^{***}$  & 51,795.7$^{***}$\\   
+                                  & (10,226.3)        & (16,316.3)\\   
+   Lagged Donations    & 0.0080            & 0.0223$^{**}$\\   
+                                  & (0.0125)          & (0.0103)\\   
+   Lagged Protests             & -18,079.8$^{***}$ & -48,062.8$^{***}$\\   
+                                  & (3,875.6)         & (16,550.5)\\   
+   \midrule
+   \emph{Fixed-effects}\\
+   County            & Yes               & Yes\\  
+   Year                   & Yes               & Yes\\  
+   Week                   & Yes               & Yes\\  
+   \midrule
+   \emph{Fit statistics}\\
+   Observations                   & 827,320           & 827,320\\  
+   R$^2$                          & 0.42995           & 0.51047\\  
+   Within R$^2$                   & 0.01192           & 0.00520\\  
+   \midrule \midrule
+   \multicolumn{3}{l}{\emph{Clustered (County) standard-errors in parentheses}}\\
+   \multicolumn{3}{l}{\emph{Signif. Codes: ***: 0.01, **: 0.05, *: 0.1}}\\
+\end{tabular}
+\par\endgroup
+
+
+
+ 
